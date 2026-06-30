@@ -133,11 +133,11 @@ async function update(): Promise<void> {
   console.log("[ok] Updating...");
 
   try {
-    execSync("npm install -g github:bge-kernel-panic/leash", { stdio: "inherit" });
+    execSync("npm install -g github:sailthru/leash", { stdio: "inherit" });
     console.log("[ok] Update complete");
   } catch {
     console.error(
-      "[error] Update failed. Try manually: npm install -g github:bge-kernel-panic/leash"
+      "[error] Update failed. Try manually: npm install -g github:sailthru/leash"
     );
     process.exit(1);
   }

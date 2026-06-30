@@ -16,7 +16,7 @@ function getVersion(): string {
     if (existsSync(path)) {
       try {
         const pkg = JSON.parse(readFileSync(path, "utf-8"));
-        if (pkg.name === "@bge-kernel-panic/leash") {
+        if (pkg.name === "@sailthru/leash") {
           return pkg.version;
         }
       } catch {
@@ -31,7 +31,7 @@ function getVersion(): string {
 export const CURRENT_VERSION: string = getVersion();
 
 const VERSION_URL =
-  "https://raw.githubusercontent.com/bge-kernel-panic/leash/main/package.json";
+  "https://raw.githubusercontent.com/sailthru/leash/main/package.json";
 
 export interface UpdateCheckResult {
   hasUpdate: boolean;
