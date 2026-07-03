@@ -1,5 +1,5 @@
 {
-  "name": "@bge-kernel-panic/leash",
+  "name": "@sailthru/leash",
   "version": "1.0.17",
   "type": "module",
   "description": "Security guardrails for AI coding agents",
@@ -33,13 +33,13 @@
       "./dist/pi/leash.js"
     ]
   },
-  "homepage": "https://github.com/bge-kernel-panic/leash",
+  "homepage": "https://github.com/sailthru/leash",
   "bugs": {
-    "url": "https://github.com/bge-kernel-panic/leash/issues"
+    "url": "https://github.com/sailthru/leash/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bge-kernel-panic/leash.git"
+    "url": "git+https://github.com/sailthru/leash.git"
   },
   "scripts": {
     "test": "npm run build:core && npm run build:cli-lib && node --test packages/core/test/*.test.js packages/cli/test/*.test.js",

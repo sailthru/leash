@@ -123,6 +123,8 @@ var PathValidator = class {
     this.workingDirectory = workingDirectory;
     this.allowedDirectories = allowedDirectories;
   }
+  workingDirectory;
+  allowedDirectories;
   expand(path) {
     return path.replace(/^~(?=\/|$)/, homedir()).replace(/\$\{?(\w+)\}?/g, (_, name) => {
       if (name === "HOME") return homedir();
@@ -227,6 +229,7 @@ var CommandAnalyzer = class {
     this.workingDirectory = workingDirectory;
     this.pathValidator = new PathValidator(workingDirectory, allowedDirectories);
   }
+  workingDirectory;
   pathValidator;
   suggestAllow(blockedPath) {
     return this.pathValidator.suggestAllowableSymlink(blockedPath);
@@ -629,7 +632,7 @@ function getVersion() {
     if (existsSync(path)) {
       try {
         const pkg = JSON.parse(readFileSync(path, "utf-8"));
-        if (pkg.name === "@bge-kernel-panic/leash") {
+        if (pkg.name === "@sailthru/leash") {
           return pkg.version;
         }
       } catch {
@@ -639,7 +642,7 @@ function getVersion() {
   return "0.0.0";
 }
 var CURRENT_VERSION = getVersion();
-var VERSION_URL = "https://raw.githubusercontent.com/bge-kernel-panic/leash/main/package.json";
+var VERSION_URL = "https://raw.githubusercontent.com/sailthru/leash/main/package.json";
 function parseVersionPart(part) {
   return parseInt(part.split(/[-_]/)[0], 10) || 0;
 }

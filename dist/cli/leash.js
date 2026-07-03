@@ -1664,7 +1664,7 @@ function getVersion() {
     if (existsSync2(path)) {
       try {
         const pkg = JSON.parse(readFileSync2(path, "utf-8"));
-        if (pkg.name === "@bge-kernel-panic/leash") {
+        if (pkg.name === "@sailthru/leash") {
           return pkg.version;
         }
       } catch {
@@ -1674,7 +1674,7 @@ function getVersion() {
   return "0.0.0";
 }
 var CURRENT_VERSION = getVersion();
-var VERSION_URL = "https://raw.githubusercontent.com/bge-kernel-panic/leash/main/package.json";
+var VERSION_URL = "https://raw.githubusercontent.com/sailthru/leash/main/package.json";
 function parseVersionPart(part) {
   return parseInt(part.split(/[-_]/)[0], 10) || 0;
 }
@@ -1816,11 +1816,11 @@ async function update() {
   );
   console.log("[ok] Updating...");
   try {
-    execSync("npm install -g github:bge-kernel-panic/leash", { stdio: "inherit" });
+    execSync("npm install -g github:sailthru/leash", { stdio: "inherit" });
     console.log("[ok] Update complete");
   } catch {
     console.error(
-      "[error] Update failed. Try manually: npm install -g github:bge-kernel-panic/leash"
+      "[error] Update failed. Try manually: npm install -g github:sailthru/leash"
     );
     process.exit(1);
   }

@@ -31,7 +31,7 @@ Links:
 
 ```bash
 # Install leash globally from GitHub
-npm install -g github:bge-kernel-panic/leash
+npm install -g github:sailthru/leash
 
 # Setup leash for your platform
 leash setup <platform>
