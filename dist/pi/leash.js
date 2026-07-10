@@ -707,6 +707,7 @@ function readLeashrc(cwd) {
 function leash_default(pi) {
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.notify("\u{1F512} Leash active", "info");
+    ctx.ui.setStatus("leash", "\u{1F512} Leash active");
     const update = await checkForUpdates();
     if (update.hasUpdate) {
       ctx.ui.notify(
