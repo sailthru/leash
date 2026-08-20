@@ -20,8 +20,7 @@ export const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; name: string }> = [
   { pattern: /\brsync\b.*--delete\b/, name: "rsync --delete" },
 ];
 
-export const REDIRECT_PATTERN =
-  />{1,2}\s*(?:"([^"]+)"|'([^']+)'|([^\s;|&>]+))/g;
+export const REDIRECT_PATTERN = /\d*>{1,2}\s*/g;
 
 const DEVICE_PATHS = ["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr"];
 

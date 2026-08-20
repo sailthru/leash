@@ -78,6 +78,25 @@ test("allows redirect to /dev/null", () => {
   assert.strictEqual(result.blocked, false);
 });
 
+test("allows /dev/null before a command substitution closes", () => {
+  const result = analyzer.analyze(
+    'cd ~/src/njs && echo "pcre-config: $(command -v pcre-config)  prefix: $(brew --prefix pcre 2>/dev/null)" && ./configure 2>&1 | tail -8'
+  );
+  assert.strictEqual(result.blocked, false);
+});
+
+test("allows quoted and escaped literal redirect targets", () => {
+  const result = analyzer.analyze(
+    "echo > \"./output|file)\" && echo > ./output\\|file\\) && echo > '$STATIC_NAME'"
+  );
+  assert.strictEqual(result.blocked, false);
+});
+
+test("blocks redirect target with shell expansion", () => {
+  const result = analyzer.analyze('echo > "$UNKNOWN_PATH"');
+  assert.strictEqual(result.blocked, true);
+});
+
 test("blocks quoted redirect to home", () => {
   const result = analyzer.analyze('echo "data" > "~/file.txt"');
   assert.strictEqual(result.blocked, true);
