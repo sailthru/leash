@@ -4,6 +4,7 @@ import { CommandAnalyzer, checkForUpdates, readLeashrc } from "../core/index.js"
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.notify("🔒 Leash active", "info");
+    ctx.ui.setStatus("leash", "🔒 Leash active");
 
     const update = await checkForUpdates();
     if (update.hasUpdate) {

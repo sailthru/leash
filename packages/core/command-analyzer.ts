@@ -227,16 +227,66 @@ export class CommandAnalyzer {
     return commands;
   }
 
+  private extractRedirectPath(
+    command: string,
+    start: number
+  ): { path: string; dynamic: boolean } | null {
+    let path = "";
+    let quote: "'" | '"' | null = null;
+    let dynamic = false;
+
+    for (let i = start; i < command.length; i++) {
+      const char = command[i];
+
+      if (char === "\\" && quote !== "'") {
+        const nextChar = command[++i];
+        if (nextChar) path += nextChar;
+        continue;
+      }
+
+      if (quote) {
+        if (char === quote) {
+          quote = null;
+        } else {
+          if (char === "$" && quote !== "'") dynamic = true;
+          path += char;
+        }
+        continue;
+      }
+
+      if (char === "'" || char === '"') {
+        quote = char;
+      } else if (/\s/.test(char) || ";|&()<>".includes(char)) {
+        break;
+      } else {
+        if (char === "$") dynamic = true;
+        path += char;
+      }
+    }
+
+    return path ? { path, dynamic } : null;
+  }
+
   private checkRedirects(command: string): AnalysisResult {
     // Strip heredoc content to avoid false positives from embedded code
     const strippedCommand = this.stripHeredocs(command);
     const matches = strippedCommand.matchAll(REDIRECT_PATTERN);
 
     for (const match of matches) {
-      const path = match[1] || match[2] || match[3];
-      if (!path || path.startsWith("&")) {
-        continue;
+      const redirect = this.extractRedirectPath(
+        strippedCommand,
+        match.index + match[0].length
+      );
+      if (!redirect) continue;
+
+      if (redirect.dynamic) {
+        return {
+          blocked: true,
+          reason: "Redirect target contains shell expansion",
+        };
       }
+
+      const { path } = redirect;
       if (
         !this.pathValidator.isSafeForWrite(path) &&
         !this.pathValidator.isWithinAllowedDir(path) &&

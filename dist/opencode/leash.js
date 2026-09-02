@@ -28,7 +28,7 @@ var DANGEROUS_PATTERNS = [
   { pattern: /\bxargs\s+(-[^\s]+\s+)*(rm|mv|cp)\b/, name: "xargs" },
   { pattern: /\brsync\b.*--delete\b/, name: "rsync --delete" }
 ];
-var REDIRECT_PATTERN = />{1,2}\s*(?:"([^"]+)"|'([^']+)'|([^\s;|&>]+))/g;
+var REDIRECT_PATTERN = /\d*>{1,2}\s*/g;
 var DEVICE_PATHS = ["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr"];
 var PLATFORM_PATHS = [
   ".claude",
@@ -382,14 +382,53 @@ var CommandAnalyzer = class {
     if (current.trim()) commands.push(current.trim());
     return commands;
   }
+  extractRedirectPath(command, start) {
+    let path = "";
+    let quote = null;
+    let dynamic = false;
+    for (let i = start; i < command.length; i++) {
+      const char = command[i];
+      if (char === "\\" && quote !== "'") {
+        const nextChar = command[++i];
+        if (nextChar) path += nextChar;
+        continue;
+      }
+      if (quote) {
+        if (char === quote) {
+          quote = null;
+        } else {
+          if (char === "$" && quote !== "'") dynamic = true;
+          path += char;
+        }
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quote = char;
+      } else if (/\s/.test(char) || ";|&()<>".includes(char)) {
+        break;
+      } else {
+        if (char === "$") dynamic = true;
+        path += char;
+      }
+    }
+    return path ? { path, dynamic } : null;
+  }
   checkRedirects(command) {
     const strippedCommand = this.stripHeredocs(command);
     const matches = strippedCommand.matchAll(REDIRECT_PATTERN);
     for (const match of matches) {
-      const path = match[1] || match[2] || match[3];
-      if (!path || path.startsWith("&")) {
-        continue;
+      const redirect = this.extractRedirectPath(
+        strippedCommand,
+        match.index + match[0].length
+      );
+      if (!redirect) continue;
+      if (redirect.dynamic) {
+        return {
+          blocked: true,
+          reason: "Redirect target contains shell expansion"
+        };
       }
+      const { path } = redirect;
       if (!this.pathValidator.isSafeForWrite(path) && !this.pathValidator.isWithinAllowedDir(path) && !this.pathValidator.isPlatformPath(path)) {
         return {
           blocked: true,
