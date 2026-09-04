@@ -388,10 +388,13 @@ const blockedGhCommands = [
   { cmd: "gh api search/code -X=DELETE", reason: "gh api -X DELETE" },
   { cmd: "gh api search/code --method DELETE", reason: "gh api -X DELETE" },
   { cmd: "gh api search/code --method=DELETE", reason: "gh api -X DELETE" },
+  { cmd: "gh api graphql -XDELETE", reason: "gh api -X DELETE" },
+  { cmd: "gh api graphql --method=DELETE", reason: "gh api -X DELETE" },
   {
     cmd: "gh api graphql/../../repos/owner/repo -X PUT",
     reason: "gh api",
   },
+  { cmd: "gh api graphql/../../repos/owner/repo", reason: "gh api" },
   { cmd: "gh api graphql/repos/x", reason: "gh api" },
   { cmd: "gh attestation verify artifact.tar.gz", reason: "gh attestation" },
   { cmd: "gh copilot suggest", reason: "gh copilot" },
