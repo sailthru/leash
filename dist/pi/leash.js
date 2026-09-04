@@ -82,9 +82,12 @@ var ALWAYS_BLOCKED_PATTERNS = [
   // Block gh api except read-only endpoints we trust: graphql and code
   // search. Endpoint stays anchored right after `gh api` (an optional
   // `-X GET` may precede it) so a dangerous endpoint can't ride through
-  // by appearing later in the command. Endpoint-first form always works.
+  // by appearing later in the command. The search/code token must end at
+  // a query string, whitespace, or end-of-command — forbidding a trailing
+  // `/` stops path traversal (`search/code/../../repos/x`) from walking to
+  // another endpoint. Endpoint-first form always works.
   {
-    pattern: /\bgh\s+api (?!(?:graphql|(?:-X GET\s+)?\/?search\/code)\b)/,
+    pattern: /\bgh\s+api (?!(?:graphql\b|(?:-X GET\s+)?\/?search\/code(?=[?\s]|$)))/,
     name: "gh api (not graphql/search-code)"
   },
   { pattern: /\bgh\s+attestation\b/, name: "gh attestation" },
