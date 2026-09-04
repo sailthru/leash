@@ -374,6 +374,8 @@ const blockedGhCommands = [
   { cmd: "gh workflow disable ci.yml", reason: "gh workflow disable" },
   { cmd: "gh agent-task create", reason: "gh agent-task" },
   { cmd: "gh api repos/owner/repo", reason: "gh api" },
+  { cmd: "gh api -X DELETE repos/owner/repo", reason: "gh api" },
+  { cmd: "gh api search/commits?q=foo", reason: "gh api" },
   { cmd: "gh attestation verify artifact.tar.gz", reason: "gh attestation" },
   { cmd: "gh copilot suggest", reason: "gh copilot" },
   { cmd: "gh gpg-keys add key.gpg", reason: "gh gpg-keys" },
@@ -402,6 +404,9 @@ const allowedGhCommands = [
   "gh pr create --title 'fix' --body 'desc'",
   "gh search issues --repo owner/repo 'bug'",
   "gh api graphql -f query='{ viewer { login } }'",
+  "gh api search/code?q=foo",
+  "gh api -X GET search/code -f q=foo",
+  "gh api search/code -X GET -f q=foo",
 ];
 
 for (const cmd of allowedGhCommands) {

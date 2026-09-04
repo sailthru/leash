@@ -81,7 +81,14 @@ export const ALWAYS_BLOCKED_PATTERNS: Array<{ pattern: RegExp; name: string }> =
     { pattern: /\bgh\s+run delete\b/, name: "gh run delete" },
     { pattern: /\bgh\s+workflow disable\b/, name: "gh workflow disable" },
     { pattern: /\bgh\s+agent-task\b/, name: "gh agent-task" },
-    { pattern: /\bgh\s+api (?!graphql)\b/, name: "gh api (not graphql)" },
+    // Block gh api except read-only endpoints we trust: graphql and code
+    // search. Endpoint stays anchored right after `gh api` (an optional
+    // `-X GET` may precede it) so a dangerous endpoint can't ride through
+    // by appearing later in the command. Endpoint-first form always works.
+    {
+      pattern: /\bgh\s+api (?!(?:graphql|(?:-X GET\s+)?\/?search\/code)\b)/,
+      name: "gh api (not graphql/search-code)",
+    },
     { pattern: /\bgh\s+attestation\b/, name: "gh attestation" },
     { pattern: /\bgh\s+copilot\b/, name: "gh copilot" },
     { pattern: /\bgh\s+gpg-keys\b/, name: "gh gpg-keys" },
