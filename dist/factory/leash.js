@@ -84,14 +84,20 @@ var ALWAYS_BLOCKED_PATTERNS = [
   // Block gh api except read-only endpoints we trust: graphql and code
   // search. Endpoint stays anchored right after `gh api` (an optional
   // `-X GET` may precede it) so a dangerous endpoint can't ride through
-  // by appearing later in the command. The search/code token must end at
-  // a query string, whitespace, or end-of-command — forbidding a trailing
-  // `/` stops path traversal (`search/code/../../repos/x`) from walking to
-  // another endpoint. Endpoint-first form always works.
+  // by appearing later in the command. The search/code token must be
+  // followed by a query string or whitespace — forbidding a trailing `/`
+  // stops path traversal (`search/code/../../repos/x`) from walking to
+  // another endpoint, and requiring something after rejects the useless
+  // bare call. Endpoint-first form always works.
   {
-    pattern: /\bgh\s+api (?!(?:graphql\b|(?:-X GET\s+)?\/?search\/code(?=[?\s]|$)))/,
+    pattern: /\bgh\s+api (?!(?:graphql\b|(?:-X GET\s+)?\/?search\/code(?=[?\s])))/,
     name: "gh api (not graphql/search-code)"
   },
+  // Defense-in-depth: DELETE is never valid on the allowlisted endpoints
+  // (graphql is POST-only, search/code is GET-only), so treat any
+  // `-X DELETE` on gh api as hostile. Arbitrary endpoints are already
+  // caught above; this closes the residual no-op on allowlisted ones.
+  { pattern: /\bgh\s+api\b.*-X\s+DELETE\b/, name: "gh api -X DELETE" },
   { pattern: /\bgh\s+attestation\b/, name: "gh attestation" },
   { pattern: /\bgh\s+copilot\b/, name: "gh copilot" },
   { pattern: /\bgh\s+gpg-keys\b/, name: "gh gpg-keys" },
