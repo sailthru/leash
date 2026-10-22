@@ -6,18 +6,18 @@ import {
   readFileSync as readFileSync3,
   writeFileSync as writeFileSync2,
   statSync,
-  lstatSync,
+  lstatSync as lstatSync2,
   realpathSync
 } from "fs";
-import { dirname as dirname3, join as join2, resolve, relative } from "path";
+import { dirname as dirname3, join as join3, resolve as resolve2, relative } from "path";
 import { homedir } from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
 import { execSync } from "child_process";
 import { createInterface } from "node:readline/promises";
 
 // packages/cli/lib.ts
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { dirname } from "path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from "fs";
+import { dirname, join, resolve } from "path";
 
 // node_modules/jsonc-parser/lib/esm/impl/scanner.js
 function createScanner(text, ignoreTrivia = false) {
@@ -1547,13 +1547,18 @@ function setupOpenCode(configPath, leashPath) {
       return { error: `Invalid JSON/JSONC in ${configPath}` };
     }
   }
-  const hasPlugin = config.plugin?.some((p) => p.includes("leash"));
+  const leashIndex = config.plugin?.findIndex((p) => p.includes("leash")) ?? -1;
+  const hasPlugin = leashIndex !== -1;
+  const hasCurrentPlugin = config.plugin?.[leashIndex] === leashPath;
   const hasPerm = hasLeashPermission(config);
-  if (hasPlugin && hasPerm) {
+  if (hasCurrentPlugin && hasPerm) {
     return { skipped: true, platform: "OpenCode" };
   }
   let updated = content;
-  if (!hasPlugin) {
+  if (hasPlugin && !hasCurrentPlugin) {
+    const edits = modify(updated, ["plugin", leashIndex], leashPath, { formattingOptions: formatOptions });
+    updated = applyEdits(updated, edits);
+  } else if (!hasPlugin) {
     let edits;
     if (!config.plugin) {
       edits = modify(updated, ["plugin"], [leashPath], { formattingOptions: formatOptions });
@@ -1578,6 +1583,52 @@ function setupOpenCode(configPath, leashPath) {
     mkdirSync(dir, { recursive: true });
   }
   writeFileSync(configPath, newContent);
+  return { success: true, platform: "OpenCode", configPath };
+}
+function setupOpenCodeV2(configPath, leashPath) {
+  const formatOptions = { tabSize: 2, insertSpaces: true };
+  let content = "";
+  let config = {};
+  if (existsSync(configPath)) {
+    content = readFileSync(configPath, "utf-8");
+    const errors = [];
+    config = parse2(content, errors);
+    if (errors.length > 0) return { error: `Invalid JSON/JSONC in ${configPath}` };
+  }
+  const pluginLink = join(dirname(configPath), "plugins", "leash.js");
+  const configuredPlugins = (config.plugins || config.plugin || []).filter((plugin) => !plugin.includes("leash"));
+  const hasPerm = hasLeashPermission(config);
+  try {
+    mkdirSync(dirname(pluginLink), { recursive: true });
+    if (existsSync(pluginLink)) {
+      if (!lstatSync(pluginLink).isSymbolicLink()) {
+        return { error: `Refusing to replace non-symlink plugin file: ${pluginLink}` };
+      }
+      if (resolve(dirname(pluginLink), readlinkSync(pluginLink)) !== resolve(leashPath)) {
+        unlinkSync(pluginLink);
+        symlinkSync(leashPath, pluginLink);
+      }
+    } else {
+      symlinkSync(leashPath, pluginLink);
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Unable to install OpenCode plugin" };
+  }
+  let updated = content;
+  const pluginEdits = modify(updated, ["plugins"], configuredPlugins, { formattingOptions: formatOptions });
+  updated = applyEdits(updated, pluginEdits);
+  if (config.plugin) {
+    const legacyPluginEdits = modify(updated, ["plugin"], void 0, { formattingOptions: formatOptions });
+    updated = applyEdits(updated, legacyPluginEdits);
+  }
+  if (!hasPerm) {
+    const bash = typeof config.permission?.bash === "string" ? { "*": config.permission.bash, "leash allow *": "ask" } : { ...config.permission?.bash || {}, "leash allow *": "ask" };
+    const permissionEdits = modify(updated, ["permission", "bash"], bash, { formattingOptions: formatOptions });
+    updated = applyEdits(updated, permissionEdits);
+  }
+  const dir = dirname(configPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(configPath, updated);
   return { success: true, platform: "OpenCode", configPath };
 }
 function removeOpenCode(configPath) {
@@ -1608,13 +1659,13 @@ function removeOpenCode(configPath) {
   writeFileSync(configPath, updated);
   return { success: true, platform: "OpenCode" };
 }
-function setupPlatform(platformKey, configPath, leashPath) {
+function setupPlatform(platformKey, configPath, leashPath, openCodeV2 = false) {
   const platform = PLATFORMS[platformKey];
   if (!platform) {
     return { error: `Unknown platform: ${platformKey}` };
   }
   if (platformKey === "opencode") {
-    return setupOpenCode(configPath, leashPath);
+    return openCodeV2 ? setupOpenCodeV2(configPath, leashPath) : setupOpenCode(configPath, leashPath);
   }
   const config = readConfig(configPath);
   if (!platform.setup) {
@@ -1652,13 +1703,13 @@ function removePlatform(platformKey, configPath) {
 
 // packages/core/version-checker.ts
 import { readFileSync as readFileSync2, existsSync as existsSync2 } from "fs";
-import { dirname as dirname2, join } from "path";
+import { dirname as dirname2, join as join2 } from "path";
 import { fileURLToPath } from "url";
 function getVersion() {
   const __dirname2 = dirname2(fileURLToPath(import.meta.url));
   const candidates = [
-    join(__dirname2, "..", "..", "package.json"),
-    join(__dirname2, "..", "..", "..", "package.json")
+    join2(__dirname2, "..", "..", "package.json"),
+    join2(__dirname2, "..", "..", "..", "package.json")
   ];
   for (const path of candidates) {
     if (existsSync2(path)) {
@@ -1729,23 +1780,31 @@ function parseLeashrc(content) {
 var __dirname = dirname3(fileURLToPath2(import.meta.url));
 var LEASHRC = ".leashrc";
 function getDistPath() {
-  return join2(__dirname, "..");
+  return join3(__dirname, "..");
 }
 function getConfigPath(platformKey) {
   const platform = PLATFORMS[platformKey];
   if (!platform) return null;
   if (platform.configPaths) {
     for (const p of platform.configPaths) {
-      const full = join2(homedir(), p);
+      const full = join3(homedir(), p);
       if (existsSync3(full)) return full;
     }
-    return join2(homedir(), platform.configPaths.at(-1));
+    return join3(homedir(), platform.configPaths.at(-1));
   }
-  return join2(homedir(), platform.configPath);
+  return join3(homedir(), platform.configPath);
 }
 function getLeashPath(platformKey) {
   const platform = PLATFORMS[platformKey];
-  return platform ? join2(getDistPath(), platform.distPath) : null;
+  return platform ? join3(getDistPath(), platform.distPath) : null;
+}
+function isOpenCodeV2() {
+  try {
+    const version = execSync("opencode --version", { encoding: "utf-8" });
+    return /^opencode v?2\./m.test(version);
+  } catch {
+    return false;
+  }
 }
 function setup(platformKey) {
   const configPath = getConfigPath(platformKey);
@@ -1759,7 +1818,7 @@ function setup(platformKey) {
     console.error(`Leash not found at: ${leashPath}`);
     process.exit(1);
   }
-  const result = setupPlatform(platformKey, configPath, leashPath);
+  const result = setupPlatform(platformKey, configPath, leashPath, platformKey === "opencode" && isOpenCodeV2());
   if (result.error) {
     console.error(result.error);
     process.exit(1);
@@ -1826,12 +1885,12 @@ async function update() {
   }
 }
 function leashrcPath() {
-  return join2(process.cwd(), LEASHRC);
+  return join3(process.cwd(), LEASHRC);
 }
 function ensureLeashrcNotSymlink() {
   const p = leashrcPath();
   try {
-    if (lstatSync(p).isSymbolicLink()) {
+    if (lstatSync2(p).isSymbolicLink()) {
       console.error("[error] .leashrc is a symlink \u2014 refusing to operate");
       process.exit(1);
     }
@@ -1856,7 +1915,7 @@ ${paths.join("\n")}
   writeFileSync2(leashrcPath(), content, "utf-8");
 }
 function allow(pathArg) {
-  const resolved = resolve(process.cwd(), pathArg);
+  const resolved = resolve2(process.cwd(), pathArg);
   try {
     if (realpathSync(resolved) === realpathSync(process.cwd())) {
       return;
@@ -1927,10 +1986,10 @@ async function revoke(pathArg) {
   if (pathArg) {
     let resolved;
     try {
-      const abs = resolve(process.cwd(), pathArg);
+      const abs = resolve2(process.cwd(), pathArg);
       resolved = existsSync3(abs) ? realpathSync(abs) : abs;
     } catch {
-      resolved = resolve(process.cwd(), pathArg);
+      resolved = resolve2(process.cwd(), pathArg);
     }
     const idx = current.indexOf(resolved);
     if (idx === -1) {

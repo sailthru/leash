@@ -700,37 +700,6 @@ function getVersion() {
   return "0.0.0";
 }
 var CURRENT_VERSION = getVersion();
-var VERSION_URL = "https://raw.githubusercontent.com/sailthru/leash/main/package.json";
-function parseVersionPart(part) {
-  return parseInt(part.split(/[-_]/)[0], 10) || 0;
-}
-function isNewerVersion(latest, current) {
-  const latestParts = latest.split(".").map(parseVersionPart);
-  const currentParts = current.split(".").map(parseVersionPart);
-  const len = Math.max(latestParts.length, currentParts.length);
-  for (let i = 0; i < len; i++) {
-    const l = latestParts[i] ?? 0;
-    const c = currentParts[i] ?? 0;
-    if (l !== c) return l > c;
-  }
-  return false;
-}
-async function checkForUpdates() {
-  try {
-    const response = await fetch(VERSION_URL);
-    if (!response.ok) {
-      return { hasUpdate: false, currentVersion: CURRENT_VERSION };
-    }
-    const data = await response.json();
-    return {
-      hasUpdate: isNewerVersion(data.version, CURRENT_VERSION),
-      latestVersion: data.version,
-      currentVersion: CURRENT_VERSION
-    };
-  } catch {
-    return { hasUpdate: false, currentVersion: CURRENT_VERSION };
-  }
-}
 
 // packages/core/leashrc.ts
 import { join as join3 } from "path";
@@ -764,65 +733,65 @@ function readLeashrc(cwd) {
 }
 
 // packages/opencode/leash.ts
-var Leash = async ({ directory, client }) => {
-  return {
-    event: async ({ event }) => {
-      if (event.type === "session.created") {
-        await client.tui.showToast({
-          body: { message: "\u{1F512} Leash active", variant: "info" }
-        });
-        const update = await checkForUpdates();
-        if (update.hasUpdate) {
-          await client.tui.showToast({
-            body: {
-              message: `\u{1F504} Leash ${update.latestVersion} available.
-Run: leash update (restart required)`,
-              variant: "warning"
-            }
-          });
-        }
-      }
-    },
-    "tool.execute.before": async (input, output) => {
-      const { allow } = readLeashrc(directory);
-      const analyzer = new CommandAnalyzer(directory, allow);
-      const shellTools = ["execute", "bash", "shell"];
-      if (shellTools.includes(input.tool)) {
-        const command = output.args?.command || output.args?.script || "";
-        const result = analyzer.analyze(command);
-        if (result.blocked) {
-          throw new Error(
-            `Command blocked: ${command}
+function guardTool(directory, tool, input) {
+  const { allow } = readLeashrc(directory);
+  const analyzer = new CommandAnalyzer(directory, allow);
+  const shellTools = ["execute", "bash", "shell"];
+  if (shellTools.includes(tool)) {
+    const command = input.command || input.script || "";
+    const result = analyzer.analyze(command);
+    if (result.blocked) {
+      throw new Error(
+        `Command blocked: ${command}
 Reason: ${result.reason}
 Working directory: ${directory}
 Action: Guide the user to run the command manually.`
-          );
-        }
+      );
+    }
+  }
+  const fileTools = ["write", "edit", "patch"];
+  if (fileTools.includes(tool)) {
+    const paths = [input.path || ""];
+    if (tool === "patch" && typeof input.patchText === "string") {
+      for (const line of input.patchText.split("\n")) {
+        const target = line.trim().match(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/);
+        if (target) paths.push(target[1].trim());
       }
-      const fileTools = ["write", "edit", "patch"];
-      if (fileTools.includes(input.tool)) {
-        const path = output.args?.path || "";
-        const result = analyzer.validatePath(path);
-        if (result.blocked) {
-          const suggestion = analyzer.suggestAllow(path);
-          let msg = `File operation blocked: ${path}
+    }
+    for (const path of paths) {
+      const result = analyzer.validatePath(path);
+      if (result.blocked) {
+        const suggestion = analyzer.suggestAllow(path);
+        let msg = `File operation blocked: ${path}
 Reason: ${result.reason}
 Working directory: ${directory}
 `;
-          if (suggestion) {
-            msg += `Hint: This path is reachable via symlink "${suggestion}" in your working directory.
+        if (suggestion) {
+          msg += `Hint: This path is reachable via symlink "${suggestion}" in your working directory.
       Run: leash allow ${suggestion}
 `;
-          }
-          msg += `Action: Guide the user to perform this operation manually.`;
-          throw new Error(msg);
         }
+        msg += `Action: Guide the user to perform this operation manually.`;
+        throw new Error(msg);
       }
     }
-  };
+  }
+}
+var Leash = {
+  id: "sailthru.leash",
+  async setup(ctx) {
+    const directory = ctx.location.directory;
+    await ctx.tool.hook("execute.before", (event) => {
+      guardTool(directory, event.tool, event.input);
+    });
+  },
+  async server({ directory }) {
+    return {
+      "tool.execute.before": (input, output) => guardTool(directory, input.tool, output.args || {})
+    };
+  }
 };
 var leash_default = Leash;
 export {
-  Leash,
   leash_default as default
 };

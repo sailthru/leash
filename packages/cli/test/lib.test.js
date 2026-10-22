@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { mkdirSync, rmSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { setupPlatform, removePlatform, readConfig } from "../lib/lib.js";
@@ -68,13 +68,48 @@ test("opencode: setup skips if already installed", () => {
   setup();
   const configPath = getConfigPath("opencode-skip");
   writeTestConfig("opencode-skip", {
-    plugin: ["/some/leash/path.js"],
+    plugin: [LEASH_PATH],
     permission: { bash: { "leash allow *": "ask" } },
   });
 
   const result = setupPlatform("opencode", configPath, LEASH_PATH);
 
   assert.strictEqual(result.skipped, true);
+
+  cleanup();
+});
+
+test("given obsolete leash path when setting up opencode then replaces it", () => {
+  setup();
+  const configPath = getConfigPath("opencode-replace");
+  writeTestConfig("opencode-replace", {
+    plugin: ["/old/node/leash.js"],
+    permission: { bash: { "leash allow *": "ask" } },
+  });
+
+  const result = setupPlatform("opencode", configPath, LEASH_PATH);
+
+  assert.strictEqual(result.success, true);
+  assert.deepStrictEqual(readTestConfig("opencode-replace").plugin, [LEASH_PATH]);
+
+  cleanup();
+});
+
+test("given OpenCode V2 when setting up then migrates the plugin configuration", () => {
+  setup();
+  const configPath = getConfigPath("opencode-v2");
+  writeTestConfig("opencode-v2", {
+    plugin: ["/old/node/leash.js", "@other/plugin"],
+    permission: { bash: { "leash allow *": "ask" } },
+  });
+
+  const result = setupPlatform("opencode", configPath, LEASH_PATH, true);
+  const config = readTestConfig("opencode-v2");
+
+  assert.strictEqual(result.success, true);
+  assert.deepStrictEqual(config.plugins, ["@other/plugin"]);
+  assert.strictEqual(config.plugin, undefined);
+  assert.ok(lstatSync(join(TEST_DIR, "plugins", "leash.js")).isSymbolicLink());
 
   cleanup();
 });

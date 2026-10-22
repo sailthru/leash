@@ -43,6 +43,15 @@ function getLeashPath(platformKey: string): string | null {
   return platform ? join(getDistPath(), platform.distPath) : null;
 }
 
+function isOpenCodeV2(): boolean {
+  try {
+    const version = execSync("opencode --version", { encoding: "utf-8" });
+    return /^opencode v?2\./m.test(version);
+  } catch {
+    return false;
+  }
+}
+
 function setup(platformKey: string): void {
   const configPath = getConfigPath(platformKey);
   const leashPath = getLeashPath(platformKey);
@@ -58,7 +67,7 @@ function setup(platformKey: string): void {
     process.exit(1);
   }
 
-  const result = setupPlatform(platformKey, configPath, leashPath);
+  const result = setupPlatform(platformKey, configPath, leashPath, platformKey === "opencode" && isOpenCodeV2());
 
   if (result.error) {
     console.error(result.error);
