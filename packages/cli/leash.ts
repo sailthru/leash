@@ -177,6 +177,7 @@ function setupCodex(): void {
     if (!plugins.some((plugin) => plugin.pluginId === "leash@leash")) {
       execFileSync("codex", ["plugin", "add", "leash@leash"], { stdio: "pipe" });
     }
+    setCodexPluginEnabled(true);
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Unable to install Codex plugin");
     process.exit(1);
