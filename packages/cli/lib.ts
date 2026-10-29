@@ -197,6 +197,10 @@ export const PLATFORMS: Record<string, Platform> = {
     preToolUseMatcher: "Execute|Write|Edit",
     bashToolName: "Execute",
   }),
+  codex: {
+    name: "Codex",
+    distPath: "codex-marketplace",
+  },
 };
 
 export function readConfig(configPath: string): Config {

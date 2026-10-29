@@ -9,6 +9,7 @@ export const DANGEROUS_COMMANDS = new Set([
   "chown",
   "chgrp",
   "truncate",
+  "touch",
   "dd",
   "ln",
 ]);

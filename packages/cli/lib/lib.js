@@ -123,7 +123,11 @@ const PLATFORMS = {
     distPath: "factory/leash.js",
     preToolUseMatcher: "Execute|Write|Edit",
     bashToolName: "Execute"
-  })
+  }),
+  codex: {
+    name: "Codex",
+    distPath: "codex-marketplace"
+  }
 };
 function readConfig(configPath) {
   if (!existsSync(configPath)) {

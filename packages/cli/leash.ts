@@ -9,7 +9,7 @@ import {
 import { dirname, join, resolve, relative } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { createInterface } from "node:readline/promises";
 import { PLATFORMS, setupPlatform, removePlatform } from "./lib.js";
 import { checkForUpdates } from "../core/version-checker.js";
@@ -53,6 +53,11 @@ function isOpenCodeV2(): boolean {
 }
 
 function setup(platformKey: string): void {
+  if (platformKey === "codex") {
+    setupCodex();
+    return;
+  }
+
   const configPath = getConfigPath(platformKey);
   const leashPath = getLeashPath(platformKey);
 
@@ -85,6 +90,11 @@ function setup(platformKey: string): void {
 }
 
 function remove(platformKey: string): void {
+  if (platformKey === "codex") {
+    removeCodex();
+    return;
+  }
+
   const configPath = getConfigPath(platformKey);
 
   if (!configPath) {
@@ -126,6 +136,99 @@ function showPath(platformKey: string): void {
   console.log(leashPath);
 }
 
+function codexInstalledPlugins(): { pluginId: string }[] | null {
+  try {
+    const output = execFileSync("codex", ["plugin", "list", "--json"], { encoding: "utf-8" });
+    return JSON.parse(output).installed;
+  } catch {
+    return null;
+  }
+}
+
+function codexMarketplaces(): string[] | null {
+  try {
+    const output = execFileSync("codex", ["plugin", "marketplace", "list"], { encoding: "utf-8" });
+    return output.split("\n").map((line) => line.trim().split(/\s{2,}/)[0]).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+function setupCodex(): void {
+  const marketplacePath = getLeashPath("codex");
+  if (!marketplacePath || !existsSync(join(marketplacePath, ".agents", "plugins", "marketplace.json"))) {
+    console.error(`Leash Codex plugin not found at: ${marketplacePath}`);
+    process.exit(1);
+  }
+
+  const marketplaces = codexMarketplaces();
+  if (marketplaces === null) {
+    console.log("[ok] Codex is not installed; run 'leash setup codex' after installing it");
+    return;
+  }
+
+  try {
+    if (!marketplaces.includes("leash")) {
+      execFileSync("codex", ["plugin", "marketplace", "add", marketplacePath], { stdio: "pipe" });
+    }
+
+    const plugins = codexInstalledPlugins();
+    if (plugins === null) throw new Error("Unable to list Codex plugins");
+    if (!plugins.some((plugin) => plugin.pluginId === "leash@leash")) {
+      execFileSync("codex", ["plugin", "add", "leash@leash"], { stdio: "pipe" });
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unable to install Codex plugin");
+    process.exit(1);
+  }
+
+  console.log("[ok] Leash installed for Codex");
+  console.log("[ok] In Codex, review and trust the Leash hook before using it");
+  console.log("[ok] Restart the ChatGPT desktop app to use the installed plugin");
+}
+
+function setCodexPluginEnabled(enabled: boolean): void {
+  const configPath = join(homedir(), ".codex", "config.toml");
+  const section = '[plugins."leash@leash"]';
+  const enabledLine = `enabled = ${enabled}`;
+  const content = existsSync(configPath) ? readFileSync(configPath, "utf-8") : "";
+  const sectionPattern = /\[plugins\."leash@leash"\][\s\S]*?(?=\n\[|$)/;
+  const existing = content.match(sectionPattern);
+  const updatedSection = existing
+    ? existing[0].replace(/^enabled\s*=.*$/m, enabledLine).includes(enabledLine)
+      ? existing[0].replace(/^enabled\s*=.*$/m, enabledLine)
+      : `${existing[0].trimEnd()}\n${enabledLine}\n`
+    : `${section}\n${enabledLine}\n`;
+  const updated = existing
+    ? content.replace(sectionPattern, updatedSection)
+    : `${content}${content && !content.endsWith("\n") ? "\n" : ""}\n${updatedSection}`;
+
+  if (updated !== content) {
+    writeFileSync(configPath, updated);
+  }
+}
+
+function removeCodex(): void {
+  const marketplaces = codexMarketplaces();
+  if (marketplaces === null) {
+    console.log("[ok] Codex is not installed; no configuration was changed");
+    return;
+  }
+
+  try {
+    setCodexPluginEnabled(false);
+    if (marketplaces.includes("leash")) {
+      execFileSync("codex", ["plugin", "marketplace", "remove", "leash"], { stdio: "pipe" });
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unable to remove Codex plugin");
+    process.exit(1);
+  }
+
+  console.log("[ok] Leash removed from Codex configuration");
+  console.log("[ok] Uninstall Leash in the ChatGPT desktop app to remove its cached copy");
+}
+
 async function update(): Promise<void> {
   console.log("Checking for updates...");
 
@@ -144,6 +247,9 @@ async function update(): Promise<void> {
   try {
     execSync("npm install -g github:sailthru/leash", { stdio: "inherit" });
     console.log("[ok] Update complete");
+    if (codexInstalledPlugins()?.some((plugin) => plugin.pluginId === "leash@leash")) {
+      console.log("[ok] In Codex, refresh or reinstall Leash, then review and trust the updated hook");
+    }
   } catch {
     console.error(
       "[error] Update failed. Try manually: npm install -g github:sailthru/leash"
@@ -355,6 +461,7 @@ Platforms:
   pi            Pi Coding Agent
   claude-code   Claude Code
   factory       Factory Droid
+  codex         Codex CLI and ChatGPT desktop app
 
 Examples:
   leash setup claude-code

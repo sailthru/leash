@@ -8,6 +8,18 @@ import { CommandAnalyzer } from "../lib/command-analyzer.js";
 const workDir = process.cwd();
 const analyzer = new CommandAnalyzer(workDir);
 
+test("given touch outside the working directory when analyzing then blocks", () => {
+  assert.strictEqual(analyzer.analyze("touch ../more_stuff/file.txt").blocked, true);
+});
+
+test("given touch of a protected file when analyzing then blocks", () => {
+  assert.strictEqual(analyzer.analyze("touch .env").blocked, true);
+});
+
+test("given touch inside the working directory when analyzing then allows", () => {
+  assert.strictEqual(analyzer.analyze("touch 'file with spaces.txt'").blocked, false);
+});
+
 function withTempDir(fn) {
   const raw = mkdtempSync(join(tmpdir(), "leash-cmd-"));
   const dir = realpathSync(raw);

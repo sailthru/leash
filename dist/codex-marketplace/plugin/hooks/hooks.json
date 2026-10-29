@@ -1,0 +1,30 @@
+{
+  "description": "Leash security guardrails",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/leash.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Leash startup reminder"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/leash.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Checking Leash policy"
+          }
+        ]
+      }
+    ]
+  }
+}

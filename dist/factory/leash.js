@@ -21,6 +21,7 @@ var DANGEROUS_COMMANDS = /* @__PURE__ */ new Set([
   "chown",
   "chgrp",
   "truncate",
+  "touch",
   "dd",
   "ln"
 ]);

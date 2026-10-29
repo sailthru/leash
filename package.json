@@ -1,6 +1,6 @@
 {
   "name": "@sailthru/leash",
-  "version": "1.0.19",
+  "version": "1.1.0",
   "type": "module",
   "description": "Security guardrails for AI coding agents",
   "bin": {
@@ -42,16 +42,17 @@
     "url": "git+https://github.com/sailthru/leash.git"
   },
   "scripts": {
-    "test": "npm run build:core && npm run build:cli-lib && npm run build:opencode && node --test packages/core/test/*.test.js packages/cli/test/*.test.js packages/opencode/test/*.test.js",
+    "test": "npm run build:core && npm run build:cli-lib && npm run build:opencode && npm run build:codex && node --test packages/core/test/*.test.js packages/cli/test/*.test.js packages/opencode/test/*.test.js packages/codex/test/*.test.js",
     "typecheck": "tsc --noEmit",
-    "compile": "npm run build:core && npm run build:cli && npm run build:opencode && npm run build:pi && npm run build:claude-code && npm run build:factory",
+    "compile": "npm run build:core && npm run build:cli && npm run build:opencode && npm run build:pi && npm run build:claude-code && npm run build:factory && npm run build:codex",
     "build:core": "esbuild packages/core/*.ts --outdir=packages/core/lib --platform=node --format=esm",
     "build:cli-lib": "esbuild packages/cli/lib.ts --outdir=packages/cli/lib --platform=node --format=esm --main-fields=module,main",
     "build:cli": "esbuild packages/cli/leash.ts --bundle --outfile=dist/cli/leash.js --platform=node --format=esm --main-fields=module,main --banner:js='#!/usr/bin/env node'",
     "build:opencode": "esbuild packages/opencode/leash.ts --bundle --outfile=dist/opencode/leash.js --platform=node --format=esm --external:@opencode/plugin",
     "build:pi": "esbuild packages/pi/leash.ts --bundle --outfile=dist/pi/leash.js --platform=node --format=esm --external:@mariozechner/pi-coding-agent",
     "build:claude-code": "esbuild packages/claude-code/leash.ts --bundle --outfile=dist/claude-code/leash.js --platform=node --format=esm",
-    "build:factory": "esbuild packages/factory/leash.ts --bundle --outfile=dist/factory/leash.js --platform=node --format=esm"
+    "build:factory": "esbuild packages/factory/leash.ts --bundle --outfile=dist/factory/leash.js --platform=node --format=esm",
+    "build:codex": "esbuild packages/codex/leash.ts --bundle --outfile=dist/codex-marketplace/plugin/hooks/leash.mjs --platform=node --format=esm && mkdir -p dist/codex-marketplace/.agents/plugins dist/codex-marketplace/plugin/.codex-plugin && rm -f dist/codex-marketplace/plugin/plugin.json dist/codex-marketplace/plugin/hooks/leash.js && cp packages/codex/marketplace.json dist/codex-marketplace/.agents/plugins/marketplace.json && cp packages/codex/plugin/.codex-plugin/plugin.json dist/codex-marketplace/plugin/.codex-plugin/plugin.json && cp packages/codex/plugin/hooks/hooks.json dist/codex-marketplace/plugin/hooks/hooks.json"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
