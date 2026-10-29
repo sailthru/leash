@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync } from "fs";
+import { mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, readlinkSync, symlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { setupPlatform, removePlatform, readConfig } from "../lib/lib.js";
@@ -111,6 +111,84 @@ test("given OpenCode V2 when setting up then migrates the plugin configuration",
   assert.strictEqual(config.plugin, undefined);
   assert.ok(lstatSync(join(TEST_DIR, "plugins", "leash.js")).isSymbolicLink());
 
+  cleanup();
+});
+
+test("given a dangling OpenCode plugin link when setting up then repairs it", () => {
+  setup();
+  const configPath = getConfigPath("opencode-v2-dangling");
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync("/old/missing/leash.js", pluginLink);
+
+  assert.strictEqual(setupPlatform("opencode", configPath, LEASH_PATH, true).success, true);
+  assert.strictEqual(readlinkSync(pluginLink), LEASH_PATH);
+  assert.strictEqual(setupPlatform("opencode", configPath, LEASH_PATH, true).success, true);
+  assert.strictEqual(readlinkSync(pluginLink), LEASH_PATH);
+  cleanup();
+});
+
+test("given a regular OpenCode plugin file when setting up then preserves it", () => {
+  setup();
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  writeFileSync(pluginLink, "other plugin");
+
+  assert.match(setupPlatform("opencode", getConfigPath("v2-file"), LEASH_PATH, true).error, /Refusing to replace/);
+  assert.strictEqual(readFileSync(pluginLink, "utf-8"), "other plugin");
+  cleanup();
+});
+
+test("given a managed dangling OpenCode link without config when removing then unlinks it", () => {
+  setup();
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync(LEASH_PATH, pluginLink);
+
+  assert.strictEqual(removePlatform("opencode", getConfigPath("missing"), LEASH_PATH).success, true);
+  assert.throws(() => lstatSync(pluginLink), { code: "ENOENT" });
+  cleanup();
+});
+
+test("given a link to the previous V2 artifact when removing then unlinks it", () => {
+  setup();
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync(LEASH_PATH, pluginLink);
+
+  assert.strictEqual(removePlatform("opencode", getConfigPath("missing"), "/mock/path/to/leash-v2.js").success, true);
+  assert.throws(() => lstatSync(pluginLink), { code: "ENOENT" });
+  cleanup();
+});
+
+test("given an OpenCode V2 installation without permission when removing then unlinks it", () => {
+  setup();
+  const configPath = getConfigPath("v2-remove");
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  writeTestConfig("v2-remove", { plugins: ["other"] });
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync(LEASH_PATH, pluginLink);
+
+  assert.strictEqual(removePlatform("opencode", configPath, LEASH_PATH).success, true);
+  assert.throws(() => lstatSync(pluginLink), { code: "ENOENT" });
+  assert.deepStrictEqual(readTestConfig("v2-remove"), { plugins: ["other"] });
+  cleanup();
+});
+
+test("given an unrelated OpenCode plugin when removing then preserves it", () => {
+  setup();
+  const configPath = getConfigPath("v2-unrelated");
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  writeTestConfig("v2-unrelated", {});
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync("/other/plugin.js", pluginLink);
+
+  assert.strictEqual(removePlatform("opencode", configPath, LEASH_PATH).notInstalled, true);
+  assert.strictEqual(readlinkSync(pluginLink), "/other/plugin.js");
+  rmSync(pluginLink);
+  writeFileSync(pluginLink, "other plugin");
+  assert.strictEqual(removePlatform("opencode", configPath, LEASH_PATH).notInstalled, true);
+  assert.strictEqual(readFileSync(pluginLink, "utf-8"), "other plugin");
   cleanup();
 });
 

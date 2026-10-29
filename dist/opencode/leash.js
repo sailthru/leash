@@ -733,7 +733,7 @@ function readLeashrc(cwd) {
   }
 }
 
-// packages/opencode/leash.ts
+// packages/opencode/guard.ts
 function guardTool(directory, tool, input) {
   const { allow } = readLeashrc(directory);
   const analyzer = new CommandAnalyzer(directory, allow);
@@ -778,21 +778,13 @@ Working directory: ${directory}
     }
   }
 }
-var Leash = {
-  id: "sailthru.leash",
-  async setup(ctx) {
-    const directory = ctx.location.directory;
-    await ctx.tool.hook("execute.before", (event) => {
-      guardTool(directory, event.tool, event.input);
-    });
-  },
-  async server({ directory }) {
-    return {
-      "tool.execute.before": (input, output) => guardTool(directory, input.tool, output.args || {})
-    };
-  }
-};
-var leash_default = Leash;
+
+// packages/opencode/leash.ts
+async function Leash({ directory }) {
+  return {
+    "tool.execute.before": (input, output) => guardTool(directory, input.tool, output.args || {})
+  };
+}
 export {
-  leash_default as default
+  Leash as default
 };

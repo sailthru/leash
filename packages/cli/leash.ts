@@ -38,15 +38,18 @@ function getConfigPath(platformKey: string): string | null {
   return join(homedir(), platform.configPath!);
 }
 
-function getLeashPath(platformKey: string): string | null {
+function getLeashPath(platformKey: string, openCodeV2 = platformKey === "opencode" && isOpenCodeV2()): string | null {
   const platform = PLATFORMS[platformKey];
-  return platform ? join(getDistPath(), platform.distPath) : null;
+  if (!platform) return null;
+  return join(getDistPath(), platformKey === "opencode" && openCodeV2
+    ? "opencode/leash-v2.js"
+    : platform.distPath);
 }
 
 function isOpenCodeV2(): boolean {
   try {
     const version = execSync("opencode --version", { encoding: "utf-8" });
-    return /^opencode v?2\./m.test(version);
+    return /^(?:opencode\s+)?v?2\./m.test(version.trim());
   } catch {
     return false;
   }
@@ -59,7 +62,8 @@ function setup(platformKey: string): void {
   }
 
   const configPath = getConfigPath(platformKey);
-  const leashPath = getLeashPath(platformKey);
+  const openCodeV2 = platformKey === "opencode" && isOpenCodeV2();
+  const leashPath = getLeashPath(platformKey, openCodeV2);
 
   if (!configPath || !leashPath) {
     console.error(`Unknown platform: ${platformKey}`);
@@ -72,7 +76,7 @@ function setup(platformKey: string): void {
     process.exit(1);
   }
 
-  const result = setupPlatform(platformKey, configPath, leashPath, platformKey === "opencode" && isOpenCodeV2());
+  const result = setupPlatform(platformKey, configPath, leashPath, openCodeV2);
 
   if (result.error) {
     console.error(result.error);
@@ -103,7 +107,7 @@ function remove(platformKey: string): void {
     process.exit(1);
   }
 
-  const result = removePlatform(platformKey, configPath);
+  const result = removePlatform(platformKey, configPath, getLeashPath(platformKey, platformKey === "opencode") ?? undefined);
 
   if (result.error) {
     console.error(result.error);
