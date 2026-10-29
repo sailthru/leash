@@ -14,7 +14,7 @@ const PATCH_DIRECTIVE = /^\*\*\* (Add File|Update File|Delete File|Move to): (.+
 const KNOWN_PATCH_MARKERS = new Set(["*** Begin Patch", "*** End Patch", "*** End of File"]);
 
 function patchPaths(patch: string): string[] | null {
-  const lines = patch.split("\n");
+  const lines = patch.replace(/\r?\n$/, "").split(/\r?\n/);
   if (lines[0] !== "*** Begin Patch" || lines.at(-1) !== "*** End Patch") return null;
 
   const paths: string[] = [];
