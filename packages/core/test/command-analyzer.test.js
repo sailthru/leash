@@ -8,6 +8,142 @@ import { CommandAnalyzer } from "../lib/command-analyzer.js";
 const workDir = process.cwd();
 const analyzer = new CommandAnalyzer(workDir);
 
+test("given a changed directory when redirecting then validates the effective target", () => {
+  for (const operator of [">", ">>", "2>", "2>>", ">|", "&>", "&>>"]) {
+    assert.strictEqual(analyzer.analyze(`cd .. && echo test ${operator} outside.txt`).blocked, true);
+    assert.strictEqual(analyzer.analyze(`cd .. && echo test ${operator} ${join(workDir, ".env")}`).blocked, true);
+    assert.strictEqual(analyzer.analyze(`cd .. && echo test ${operator} /tmp/leash-output`).blocked, false);
+    assert.strictEqual(analyzer.analyze(`cd .. && echo test ${operator} ${join(workDir, "output.txt")}`).blocked, false);
+  }
+  assert.strictEqual(analyzer.analyze(`cd .. && cd '${workDir}' && echo test > output.txt`).blocked, false);
+  assert.strictEqual(analyzer.analyze("cd .. && echo test 2>&1").blocked, false);
+  assert.strictEqual(analyzer.analyze("cd .. &> output.txt").blocked, false);
+});
+
+test("given quoted cp operands when analyzing then preserves destination order", () => {
+  assert.strictEqual(analyzer.analyze('cp "local file" ../outside').blocked, true);
+  assert.strictEqual(analyzer.analyze('cp /etc/hosts "local file"').blocked, false);
+  assert.strictEqual(analyzer.analyze('cp "local file" .env').blocked, true);
+  assert.strictEqual(analyzer.analyze('cp file "../outside"').blocked, true);
+  assert.strictEqual(analyzer.analyze('cp file ".env"').blocked, true);
+  assert.strictEqual(analyzer.analyze('cp file "safe destination"').blocked, false);
+  assert.strictEqual(analyzer.analyze('cp file "another file" "safe destination"').blocked, false);
+  assert.strictEqual(analyzer.analyze('cp file "another file" "../outside"').blocked, true);
+});
+
+test("given dash-prefixed operands after an option terminator when analyzing then validates paths", () => {
+  for (const command of [
+    'rm -f -- "-dir/../../outside"',
+    "touch '--' '-dir/../.env'",
+    "mv -- -dir/../../outside safe",
+    "cp -- safe -dir/../../outside",
+    "rm -- -- -dir/../.env",
+  ]) {
+    assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+  }
+  for (const command of ["rm -f -- -safe", "cp -- safe -destination", "touch -option safe"]) {
+    assert.strictEqual(analyzer.analyze(command).blocked, false, command);
+  }
+});
+
+test("given shell separators and assignments when analyzing then checks each command", () => {
+  for (const command of ["echo ok\nrm .env", "echo ok & rm .env", "FOO=bar rm .env", "FOO='bar baz' rm ../outside"]) {
+    assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+  }
+  assert.strictEqual(analyzer.analyze("echo 'ok & rm .env'").blocked, false);
+  assert.strictEqual(analyzer.analyze("FOO=bar touch safe").blocked, false);
+  assert.strictEqual(analyzer.analyze("cat <<EOF\nrm .env\nEOF\necho ok").blocked, false);
+  assert.strictEqual(analyzer.analyze("cat <<EOF\ntext\nEOF\nrm .env").blocked, true);
+});
+
+test("given git directory options and gh api tabs when analyzing then blocks destructive commands", () => {
+  for (const command of ["git -C . reset --hard", "git -C . clean -fd", "gh api\trepos/example"]) {
+    assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+  }
+  assert.strictEqual(analyzer.analyze("gh api\tgraphql").blocked, false);
+});
+
+test("given shell escaped paths and backtick redirects when analyzing then blocks unsafe targets", () => {
+  for (const command of ["touch .\\env", "rm .\\env", "echo > `pwd`/output", 'echo > "`pwd`/output"']) {
+    assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+  }
+  assert.strictEqual(analyzer.analyze("echo > '`literal`'").blocked, false);
+});
+
+test("given git directory options when analyzing blocked operations then blocks each form", () => {
+  const operations = ["checkout -- .", "restore .", "reset --hard", "reset --merge", "clean -fd", "push --force", "branch -D topic", "stash drop", "stash clear"];
+  const options = ['-C "foo bar"', "-C 'foo bar'", "-Cfoo", '-C"foo bar"', '-C foo\\ bar', '-C . -C "foo bar"'];
+  for (const option of options) {
+    for (const operation of operations) {
+      const command = `git ${option} ${operation}`;
+      assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+    }
+    for (const operation of ["status", "restore --staged .", "reset --soft HEAD~1", "clean -n", "push origin main"]) {
+      const command = `git ${option} ${operation}`;
+      assert.strictEqual(analyzer.analyze(command).blocked, false, command);
+    }
+  }
+});
+
+test("given literal separators and shell escapes when analyzing then preserves their meaning", () => {
+  for (const command of ["touch 'safe & file'", "touch safe\\&file", "echo > '`literal`'", "echo > \\`literal\\`", 'echo > "\\`literal\\`"']) {
+    assert.strictEqual(analyzer.analyze(command).blocked, false, command);
+  }
+  for (const command of ["touch ../outside\\ file", "FIRST='one two' SECOND=\"three four\" rm .env", "rm '.env.local=x'"]) {
+    assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+  }
+});
+
+test("given multiple heredocs when analyzing then checks commands after them", () => {
+  const command = "cat <<FIRST\ncontent\nFIRST\ncat <<SECOND\ncontent\nSECOND\nrm .env";
+  assert.strictEqual(analyzer.analyze(command).blocked, true);
+  assert.strictEqual(analyzer.analyze(command.replace("rm .env", "echo safe")).blocked, false);
+  assert.strictEqual(analyzer.analyze("cat <<EOF; rm .env\ncontent\nEOF").blocked, true);
+  assert.strictEqual(analyzer.analyze("cat <<FIRST <<SECOND; rm .env\none\nFIRST\ntwo\nSECOND\n").blocked, true);
+  assert.strictEqual(analyzer.analyze("cat <<FIRST <<SECOND; echo safe\none\nFIRST\ntwo\nSECOND\n").blocked, false);
+});
+
+test("given quoted or escaped heredoc markers when analyzing then checks following commands", () => {
+  for (const marker of ["'<<EOF'", '"<<EOF"', '\\<<EOF']) {
+    const command = `echo ${marker}\nEOF\nrm .env`;
+    assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+    assert.strictEqual(analyzer.analyze(`echo ${marker}\necho safe; rm .env\nEOF`).blocked, true);
+  }
+  for (const quote of ["'", '"']) {
+    const command = `echo ${quote}line\n<<EOF${quote}\nEOF\nrm .env`;
+    assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+    assert.strictEqual(analyzer.analyze(command.replace("rm .env", "echo safe")).blocked, false, command);
+  }
+  for (const marker of ["'EOF'", '"EOF"', '\\EOF', "E'OF'"]) {
+    const command = `cat <<${marker}\nrm .env > ../outside\nEOF\necho safe`;
+    assert.strictEqual(analyzer.analyze(command).blocked, false, command);
+    assert.strictEqual(analyzer.analyze(command + "\nrm .env").blocked, true, command);
+  }
+  assert.strictEqual(analyzer.analyze("echo safe # <<EOF\nrm .env\nEOF").blocked, true);
+  assert.strictEqual(analyzer.analyze("echo safe # <<EOF\necho data > ../outside\nEOF").blocked, true);
+});
+
+test("given output and descriptor redirects when analyzing then validates file targets", () => {
+  for (const command of ["echo >&../outside", "echo >&.env", "echo 2>&../outside", "echo >&\"../outside\""]) {
+    assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+  }
+  for (const command of ["echo >&output", "echo 2>&1", "echo >&2", "echo 2>&-"]) {
+    assert.strictEqual(analyzer.analyze(command).blocked, false, command);
+  }
+});
+
+test("given touch outside the working directory when analyzing then blocks", () => {
+  assert.strictEqual(analyzer.analyze("touch ../more_stuff/file.txt").blocked, true);
+});
+
+test("given touch of a protected file when analyzing then blocks", () => {
+  assert.strictEqual(analyzer.analyze("touch .env").blocked, true);
+});
+
+test("given touch inside the working directory when analyzing then allows", () => {
+  assert.strictEqual(analyzer.analyze("touch 'file with spaces.txt'").blocked, false);
+});
+
 function withTempDir(fn) {
   const raw = mkdtempSync(join(tmpdir(), "leash-cmd-"));
   const dir = realpathSync(raw);
@@ -154,6 +290,14 @@ test("blocks append redirect to home", () => {
 });
 
 // ln command
+test("given ln pointing outside the working directory when analyzing then blocks", () => {
+  assert.strictEqual(analyzer.analyze("ln -s ../outside ./link").blocked, true);
+});
+
+test("given ln pointing to a protected path when analyzing then blocks", () => {
+  assert.strictEqual(analyzer.analyze("ln -s .env ./link").blocked, true);
+});
+
 test("blocks ln outside working dir", () => {
   const result = analyzer.analyze("ln -s ./file ~/link");
   assert.strictEqual(result.blocked, true);

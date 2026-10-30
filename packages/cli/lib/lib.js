@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { dirname } from "path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from "fs";
+import { basename, dirname, join, resolve } from "path";
 import * as jsonc from "jsonc-parser";
 function hasLeashPermission(config) {
   const hookPerms = [
@@ -12,6 +12,21 @@ function hasLeashPermission(config) {
   if (bashPerms.some((k) => k.includes("leash"))) return true;
   return false;
 }
+function linkExists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+function isLeashHook(command, leashPath, platform) {
+  const match = /^node (?:([^\s'";|&`$]+)|'((?:[^']|'\\'')*)'|"((?:[^"\\$`]|\\["\\$`])*)")$/.exec(command);
+  if (!match) return false;
+  const path = match[1] ?? (match[2] !== void 0 ? match[2].replace(/'\\''/g, "'") : match[3].replace(/\\(["\\$`])/g, "$1"));
+  return path === leashPath || path.endsWith(`/node_modules/@sailthru/leash/dist/${platform}/leash.js`);
+}
 function createHookPlatform(opts) {
   const askRule = `${opts.bashToolName}(leash allow *)`;
   return {
@@ -20,12 +35,13 @@ function createHookPlatform(opts) {
     distPath: opts.distPath,
     setup: (config, leashPath) => {
       config.hooks = config.hooks || {};
-      const hookCommand = { type: "command", command: `node ${leashPath}` };
+      const quotedPath = /^[\w@%+=:,./-]+$/.test(leashPath) ? leashPath : `'${leashPath.replace(/'/g, "'\\''")}'`;
+      const hookCommand = { type: "command", command: `node ${quotedPath}` };
       const inSessionStart = config.hooks.SessionStart?.some(
-        (entry) => entry.hooks?.some((h) => h.command?.includes("leash"))
+        (entry) => entry.hooks?.some((h) => h.type === "command" && isLeashHook(h.command || "", leashPath, dirname(opts.distPath)))
       );
       const inPreToolUse = config.hooks.PreToolUse?.some(
-        (entry) => entry.hooks?.some((h) => h.command?.includes("leash"))
+        (entry) => entry.hooks?.some((h) => h.type === "command" && isLeashHook(h.command || "", leashPath, dirname(opts.distPath)))
       );
       const hasPerm = hasLeashPermission(config);
       if (inSessionStart && inPreToolUse && hasPerm) {
@@ -49,22 +65,19 @@ function createHookPlatform(opts) {
       }
       return { skipped: false };
     },
-    remove: (config) => {
+    remove: (config, leashPath) => {
       if (!config.hooks && !config.permissions) return false;
       let removed = false;
-      if (config.hooks?.SessionStart) {
-        const before = config.hooks.SessionStart.length;
-        config.hooks.SessionStart = config.hooks.SessionStart.filter(
-          (entry) => !entry.hooks?.some((h) => h.command?.includes("leash"))
-        );
-        if (config.hooks.SessionStart.length < before) removed = true;
-      }
-      if (config.hooks?.PreToolUse) {
-        const before = config.hooks.PreToolUse.length;
-        config.hooks.PreToolUse = config.hooks.PreToolUse.filter(
-          (entry) => !entry.hooks?.some((h) => h.command?.includes("leash"))
-        );
-        if (config.hooks.PreToolUse.length < before) removed = true;
+      for (const event of ["SessionStart", "PreToolUse"]) {
+        if (!config.hooks?.[event]) continue;
+        config.hooks[event] = config.hooks[event].filter((entry) => {
+          if (!entry.hooks) return true;
+          const hooks = entry.hooks.filter((hook) => hook.type !== "command" || !isLeashHook(hook.command || "", leashPath, dirname(opts.distPath)));
+          if (hooks.length === entry.hooks.length) return true;
+          removed = true;
+          entry.hooks = hooks;
+          return hooks.length > 0;
+        });
       }
       if (config.permissions?.ask) {
         const before = config.permissions.ask.length;
@@ -123,7 +136,11 @@ const PLATFORMS = {
     distPath: "factory/leash.js",
     preToolUseMatcher: "Execute|Write|Edit",
     bashToolName: "Execute"
-  })
+  }),
+  codex: {
+    name: "Codex",
+    distPath: "codex-marketplace"
+  }
 };
 function readConfig(configPath) {
   if (!existsSync(configPath)) {
@@ -144,6 +161,10 @@ function writeConfig(configPath, config) {
   }
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 }
+function isOpenCodeLeashPlugin(plugin, leashPath) {
+  const name = typeof plugin === "string" ? plugin : plugin.package;
+  return typeof name === "string" && (name === leashPath || leashPath !== void 0 && basename(leashPath) === "leash-v2.js" && name === join(dirname(leashPath), "leash.js") || /^@sailthru\/leash(?:@[^/]+)?$/.test(name) || /(?:^|\/)node_modules\/@sailthru\/leash\/dist\/opencode\/leash(?:-v2)?\.js$/.test(name));
+}
 function setupOpenCode(configPath, leashPath) {
   const formatOptions = { tabSize: 2, insertSpaces: true };
   let content = "";
@@ -156,13 +177,18 @@ function setupOpenCode(configPath, leashPath) {
       return { error: `Invalid JSON/JSONC in ${configPath}` };
     }
   }
-  const hasPlugin = config.plugin?.some((p) => p.includes("leash"));
+  const leashIndex = config.plugin?.findIndex((p) => isOpenCodeLeashPlugin(p, leashPath)) ?? -1;
+  const hasPlugin = leashIndex !== -1;
+  const hasCurrentPlugin = config.plugin?.[leashIndex] === leashPath;
   const hasPerm = hasLeashPermission(config);
-  if (hasPlugin && hasPerm) {
+  if (hasCurrentPlugin && hasPerm) {
     return { skipped: true, platform: "OpenCode" };
   }
   let updated = content;
-  if (!hasPlugin) {
+  if (hasPlugin && !hasCurrentPlugin) {
+    const edits = jsonc.modify(updated, ["plugin", leashIndex], leashPath, { formattingOptions: formatOptions });
+    updated = jsonc.applyEdits(updated, edits);
+  } else if (!hasPlugin) {
     let edits;
     if (!config.plugin) {
       edits = jsonc.modify(updated, ["plugin"], [leashPath], { formattingOptions: formatOptions });
@@ -189,41 +215,113 @@ function setupOpenCode(configPath, leashPath) {
   writeFileSync(configPath, newContent);
   return { success: true, platform: "OpenCode", configPath };
 }
-function removeOpenCode(configPath) {
-  if (!existsSync(configPath)) {
-    return { notFound: true, platform: "OpenCode" };
+function setupOpenCodeV2(configPath, leashPath) {
+  const formatOptions = { tabSize: 2, insertSpaces: true };
+  let content = "";
+  let config = {};
+  if (existsSync(configPath)) {
+    content = readFileSync(configPath, "utf-8");
+    const errors = [];
+    config = jsonc.parse(content, errors);
+    if (errors.length > 0) return { error: `Invalid JSON/JSONC in ${configPath}` };
   }
-  const content = readFileSync(configPath, "utf-8");
+  const pluginLink = join(dirname(configPath), "plugins", "leash.js");
+  const configuredPlugins = (config.plugins || []).filter((plugin) => !isOpenCodeLeashPlugin(plugin, leashPath));
+  for (const plugin of config.plugin || []) {
+    if (!isOpenCodeLeashPlugin(plugin, leashPath) && !configuredPlugins.includes(plugin)) {
+      configuredPlugins.push(plugin);
+    }
+  }
+  const hasPerm = hasLeashPermission(config);
+  try {
+    mkdirSync(dirname(pluginLink), { recursive: true });
+    if (linkExists(pluginLink)) {
+      if (!lstatSync(pluginLink).isSymbolicLink()) {
+        return { error: `Refusing to replace non-symlink plugin file: ${pluginLink}` };
+      }
+      if (resolve(dirname(pluginLink), readlinkSync(pluginLink)) !== resolve(leashPath)) {
+        const target = resolve(dirname(pluginLink), readlinkSync(pluginLink));
+        if (target !== resolve(dirname(leashPath), "leash.js") && !isOpenCodeLeashPlugin(target)) {
+          return { error: `Refusing to replace unrelated plugin symlink: ${pluginLink}` };
+        }
+        unlinkSync(pluginLink);
+        symlinkSync(leashPath, pluginLink);
+      }
+    } else {
+      symlinkSync(leashPath, pluginLink);
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Unable to install OpenCode plugin" };
+  }
+  let updated = content;
+  const pluginEdits = jsonc.modify(updated, ["plugins"], configuredPlugins, { formattingOptions: formatOptions });
+  updated = jsonc.applyEdits(updated, pluginEdits);
+  if (config.plugin) {
+    const legacyPluginEdits = jsonc.modify(updated, ["plugin"], void 0, { formattingOptions: formatOptions });
+    updated = jsonc.applyEdits(updated, legacyPluginEdits);
+  }
+  if (!hasPerm) {
+    const bash = typeof config.permission?.bash === "string" ? { "*": config.permission.bash, "leash allow *": "ask" } : { ...config.permission?.bash || {}, "leash allow *": "ask" };
+    const permissionEdits = jsonc.modify(updated, ["permission", "bash"], bash, { formattingOptions: formatOptions });
+    updated = jsonc.applyEdits(updated, permissionEdits);
+  }
+  const dir = dirname(configPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(configPath, updated);
+  return { success: true, platform: "OpenCode", configPath };
+}
+function removeOpenCode(configPath, leashPath) {
+  const hasConfig = existsSync(configPath);
+  const content = hasConfig ? readFileSync(configPath, "utf-8") : "";
   const errors = [];
-  const config = jsonc.parse(content, errors);
+  const config = hasConfig ? jsonc.parse(content, errors) : {};
   if (errors.length > 0) {
     return { error: `Invalid JSON/JSONC in ${configPath}` };
   }
-  const leashIndex = config.plugin?.findIndex((p) => p.includes("leash")) ?? -1;
+  const leashIndices = (config.plugin || []).flatMap((plugin, index) => isOpenCodeLeashPlugin(plugin, leashPath) ? [index] : []);
+  const leashV2Indices = (config.plugins || []).flatMap((plugin, index) => isOpenCodeLeashPlugin(plugin, leashPath) ? [index] : []);
   const hasPerm = config.permission?.bash?.["leash allow *"] !== void 0;
-  if (leashIndex === -1 && !hasPerm) {
-    return { notInstalled: true, platform: "OpenCode" };
+  const pluginLink = join(dirname(configPath), "plugins", "leash.js");
+  let removedLink = false;
+  try {
+    const managedTargets = leashPath ? [resolve(leashPath), resolve(dirname(leashPath), "leash.js")] : [];
+    if (linkExists(pluginLink) && lstatSync(pluginLink).isSymbolicLink()) {
+      const target = resolve(dirname(pluginLink), readlinkSync(pluginLink));
+      if (managedTargets.includes(target) || isOpenCodeLeashPlugin(target)) {
+        unlinkSync(pluginLink);
+        removedLink = true;
+      }
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Unable to remove OpenCode plugin" };
+  }
+  if (leashIndices.length === 0 && leashV2Indices.length === 0 && !hasPerm && !removedLink) {
+    return hasConfig ? { notInstalled: true, platform: "OpenCode" } : { notFound: true, platform: "OpenCode" };
   }
   const formatOptions = { tabSize: 2, insertSpaces: true };
   let updated = content;
-  if (leashIndex !== -1) {
-    const edits = jsonc.modify(updated, ["plugin", leashIndex], void 0, { formattingOptions: formatOptions });
+  for (const index of leashIndices.reverse()) {
+    const edits = jsonc.modify(updated, ["plugin", index], void 0, { formattingOptions: formatOptions });
+    updated = jsonc.applyEdits(updated, edits);
+  }
+  for (const index of leashV2Indices.reverse()) {
+    const edits = jsonc.modify(updated, ["plugins", index], void 0, { formattingOptions: formatOptions });
     updated = jsonc.applyEdits(updated, edits);
   }
   if (hasPerm) {
     const edits = jsonc.modify(updated, ["permission", "bash", "leash allow *"], void 0, { formattingOptions: formatOptions });
     updated = jsonc.applyEdits(updated, edits);
   }
-  writeFileSync(configPath, updated);
+  if (hasConfig && (leashIndices.length > 0 || leashV2Indices.length > 0 || hasPerm)) writeFileSync(configPath, updated);
   return { success: true, platform: "OpenCode" };
 }
-function setupPlatform(platformKey, configPath, leashPath) {
+function setupPlatform(platformKey, configPath, leashPath, openCodeV2 = false) {
   const platform = PLATFORMS[platformKey];
   if (!platform) {
     return { error: `Unknown platform: ${platformKey}` };
   }
   if (platformKey === "opencode") {
-    return setupOpenCode(configPath, leashPath);
+    return openCodeV2 ? setupOpenCodeV2(configPath, leashPath) : setupOpenCode(configPath, leashPath);
   }
   const config = readConfig(configPath);
   if (!platform.setup) {
@@ -236,13 +334,13 @@ function setupPlatform(platformKey, configPath, leashPath) {
   writeConfig(configPath, config);
   return { success: true, platform: platform.name, configPath };
 }
-function removePlatform(platformKey, configPath) {
+function removePlatform(platformKey, configPath, leashPath) {
   const platform = PLATFORMS[platformKey];
   if (!platform) {
     return { error: `Unknown platform: ${platformKey}` };
   }
   if (platformKey === "opencode") {
-    return removeOpenCode(configPath);
+    return removeOpenCode(configPath, leashPath);
   }
   if (!existsSync(configPath)) {
     return { notFound: true, platform: platform.name };
@@ -251,7 +349,7 @@ function removePlatform(platformKey, configPath) {
   if (!platform.remove) {
     return { error: `Platform ${platformKey} has no remove handler` };
   }
-  const removed = platform.remove(config);
+  const removed = platform.remove(config, leashPath);
   if (!removed) {
     return { notInstalled: true, platform: platform.name };
   }

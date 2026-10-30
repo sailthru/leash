@@ -9,6 +9,7 @@ export const DANGEROUS_COMMANDS = new Set([
   "chown",
   "chgrp",
   "truncate",
+  "touch",
   "dd",
   "ln",
 ]);
@@ -20,7 +21,7 @@ export const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; name: string }> = [
   { pattern: /\brsync\b.*--delete\b/, name: "rsync --delete" },
 ];
 
-export const REDIRECT_PATTERN = /\d*>{1,2}\s*/g;
+export const REDIRECT_PATTERN = /\d*>{1,2}(?:\||&)?\s*/g;
 
 const DEVICE_PATHS = ["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr"];
 
@@ -47,22 +48,25 @@ export const PROTECTED_PATTERNS: Array<{ pattern: RegExp; name: string }> = [
   { pattern: /^\.leashrc$/, name: ".leashrc config" },
 ];
 
+const gitPattern = (operation: string): RegExp =>
+  new RegExp(String.raw`\bgit\s+(?:-C\s*(?:[^\s'"\\]|\\.|'[^']*'|"(?:\\.|[^"\\])*")+\s+)*${operation}`);
+
 /** Blocked even within working directory - unconditionally dangerous commands */
 export const ALWAYS_BLOCKED_PATTERNS: Array<{ pattern: RegExp; name: string }> =
   [
     // Git — can destroy uncommitted work or remote history
-    { pattern: /\bgit\s+checkout\b.*\s--\s/, name: "git checkout --" },
-    { pattern: /\bgit\s+restore\s+(?!--staged)/, name: "git restore" },
-    { pattern: /\bgit\s+reset\s+.*--hard\b/, name: "git reset --hard" },
-    { pattern: /\bgit\s+reset\s+.*--merge\b/, name: "git reset --merge" },
+    { pattern: gitPattern(String.raw`checkout\b.*\s--\s`), name: "git checkout --" },
+    { pattern: gitPattern(String.raw`restore\s+(?!--staged)`), name: "git restore" },
+    { pattern: gitPattern(String.raw`reset\s+.*--hard\b`), name: "git reset --hard" },
+    { pattern: gitPattern(String.raw`reset\s+.*--merge\b`), name: "git reset --merge" },
     {
-      pattern: /\bgit\s+clean\s+.*(-[a-zA-Z]*f[a-zA-Z]*|--force)\b/,
+      pattern: gitPattern(String.raw`clean\s+.*(-[a-zA-Z]*f[a-zA-Z]*|--force)\b`),
       name: "git clean --force",
     },
-    { pattern: /\bgit\s+push\s+.*(-f|--force)\b/, name: "git push --force" },
-    { pattern: /\bgit\s+branch\s+.*-D\b/, name: "git branch -D" },
-    { pattern: /\bgit\s+stash\s+drop\b/, name: "git stash drop" },
-    { pattern: /\bgit\s+stash\s+clear\b/, name: "git stash clear" },
+    { pattern: gitPattern(String.raw`push\s+.*(-f|--force)\b`), name: "git push --force" },
+    { pattern: gitPattern(String.raw`branch\s+.*-D\b`), name: "git branch -D" },
+    { pattern: gitPattern(String.raw`stash\s+drop\b`), name: "git stash drop" },
+    { pattern: gitPattern(String.raw`stash\s+clear\b`), name: "git stash clear" },
 
     // Github CLI (gh)
     { pattern: /\bgh\s+auth\b/, name: "gh auth" },
@@ -91,7 +95,7 @@ export const ALWAYS_BLOCKED_PATTERNS: Array<{ pattern: RegExp; name: string }> =
     // rejects the useless bare search/code call. Endpoint-first always works.
     {
       pattern:
-        /\bgh\s+api (?!(?:graphql(?=\s|$)|(?:-X GET\s+)?\/?search\/code(?=[?\s])))/,
+        /\bgh\s+api\s+(?!(?:graphql(?=\s|$)|(?:-X\s+GET\s+)?\/?search\/code(?=[?\s])))/,
       name: "gh api (not graphql/search-code)",
     },
     // Defense-in-depth: DELETE is never valid on the allowlisted endpoints

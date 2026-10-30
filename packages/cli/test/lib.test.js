@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { mkdirSync, rmSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, readlinkSync, symlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { setupPlatform, removePlatform, readConfig } from "../lib/lib.js";
@@ -68,7 +68,7 @@ test("opencode: setup skips if already installed", () => {
   setup();
   const configPath = getConfigPath("opencode-skip");
   writeTestConfig("opencode-skip", {
-    plugin: ["/some/leash/path.js"],
+    plugin: [LEASH_PATH],
     permission: { bash: { "leash allow *": "ask" } },
   });
 
@@ -76,6 +76,175 @@ test("opencode: setup skips if already installed", () => {
 
   assert.strictEqual(result.skipped, true);
 
+  cleanup();
+});
+
+test("given obsolete leash path when setting up opencode then replaces it", () => {
+  setup();
+  const configPath = getConfigPath("opencode-replace");
+  writeTestConfig("opencode-replace", {
+    plugin: ["/old/node_modules/@sailthru/leash/dist/opencode/leash.js"],
+    permission: { bash: { "leash allow *": "ask" } },
+  });
+
+  const result = setupPlatform("opencode", configPath, LEASH_PATH);
+
+  assert.strictEqual(result.success, true);
+  assert.deepStrictEqual(readTestConfig("opencode-replace").plugin, [LEASH_PATH]);
+
+  cleanup();
+});
+
+test("given OpenCode V2 when setting up then migrates the plugin configuration", () => {
+  setup();
+  const configPath = getConfigPath("opencode-v2");
+  writeTestConfig("opencode-v2", {
+    plugin: ["/old/node_modules/@sailthru/leash/dist/opencode/leash.js", "@other/plugin"],
+    permission: { bash: { "leash allow *": "ask" } },
+  });
+
+  const result = setupPlatform("opencode", configPath, LEASH_PATH, true);
+  const config = readTestConfig("opencode-v2");
+
+  assert.strictEqual(result.success, true);
+  assert.deepStrictEqual(config.plugins, ["@other/plugin"]);
+  assert.strictEqual(config.plugin, undefined);
+  assert.ok(lstatSync(join(TEST_DIR, "plugins", "leash.js")).isSymbolicLink());
+
+  cleanup();
+});
+
+test("given a checkout V1 plugin when setting up V2 then removes the legacy entry", () => {
+  setup();
+  const configPath = getConfigPath("v2-checkout-migration");
+  const v2Path = "/work/leash/dist/opencode/leash-v2.js";
+  writeTestConfig("v2-checkout-migration", {
+    plugin: ["/work/leash/dist/opencode/leash.js", "/other/dist/opencode/leash.js"],
+  });
+
+  assert.strictEqual(setupPlatform("opencode", configPath, v2Path, true).success, true);
+  assert.deepStrictEqual(readTestConfig("v2-checkout-migration").plugins, ["/other/dist/opencode/leash.js"]);
+  cleanup();
+});
+
+test("given checkout V1 entries when removing then removes them without touching unrelated plugins", () => {
+  setup();
+  const configPath = getConfigPath("v2-checkout-removal");
+  const v2Path = "/work/leash/dist/opencode/leash-v2.js";
+  writeTestConfig("v2-checkout-removal", {
+    plugin: ["/work/leash/dist/opencode/leash.js", "/other/dist/opencode/leash.js"],
+    plugins: [{ package: "/work/leash/dist/opencode/leash.js" }, "@other/plugin"],
+  });
+
+  assert.strictEqual(removePlatform("opencode", configPath, v2Path).success, true);
+  const config = readTestConfig("v2-checkout-removal");
+  assert.deepStrictEqual(config.plugin, ["/other/dist/opencode/leash.js"]);
+  assert.deepStrictEqual(config.plugins, ["@other/plugin"]);
+  cleanup();
+});
+
+test("given unrelated leash-named plugins when setting up V1 then preserves them", () => {
+  setup();
+  const configPath = getConfigPath("v1-unrelated-leash");
+  const unrelated = ["@company/unleashed-logger", "/other/leash-helper.js", "/other/dist/opencode/leash.js"];
+  writeTestConfig("v1-unrelated-leash", { plugin: unrelated });
+
+  assert.strictEqual(setupPlatform("opencode", configPath, LEASH_PATH).success, true);
+  assert.deepStrictEqual(readTestConfig("v1-unrelated-leash").plugin, [...unrelated, LEASH_PATH]);
+  assert.strictEqual(removePlatform("opencode", configPath, LEASH_PATH).success, true);
+  assert.deepStrictEqual(readTestConfig("v1-unrelated-leash").plugin, unrelated);
+  cleanup();
+});
+
+test("given V2 and legacy plugins when setting up V2 then preserves unrelated entries", () => {
+  setup();
+  const configPath = getConfigPath("v2-unrelated-leash");
+  const unrelated = ["@company/unleashed-logger", { package: "@company/leash-tools", options: { enabled: true } }];
+  writeTestConfig("v2-unrelated-leash", {
+    plugins: [...unrelated, "@other/plugin", { package: "@sailthru/leash@1.2.3" }],
+    plugin: ["/old/node_modules/@sailthru/leash/dist/opencode/leash.js", "@other/plugin"],
+  });
+
+  assert.strictEqual(setupPlatform("opencode", configPath, LEASH_PATH, true).success, true);
+  assert.deepStrictEqual(readTestConfig("v2-unrelated-leash").plugins, [...unrelated, "@other/plugin"]);
+  cleanup();
+});
+
+test("given a dangling OpenCode plugin link when setting up then repairs it", () => {
+  setup();
+  const configPath = getConfigPath("opencode-v2-dangling");
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync("/old/node_modules/@sailthru/leash/dist/opencode/leash.js", pluginLink);
+
+  assert.strictEqual(setupPlatform("opencode", configPath, LEASH_PATH, true).success, true);
+  assert.strictEqual(readlinkSync(pluginLink), LEASH_PATH);
+  assert.strictEqual(setupPlatform("opencode", configPath, LEASH_PATH, true).success, true);
+  assert.strictEqual(readlinkSync(pluginLink), LEASH_PATH);
+  cleanup();
+});
+
+test("given a regular OpenCode plugin file when setting up then preserves it", () => {
+  setup();
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  writeFileSync(pluginLink, "other plugin");
+
+  assert.match(setupPlatform("opencode", getConfigPath("v2-file"), LEASH_PATH, true).error, /Refusing to replace/);
+  assert.strictEqual(readFileSync(pluginLink, "utf-8"), "other plugin");
+  cleanup();
+});
+
+test("given a managed dangling OpenCode link without config when removing then unlinks it", () => {
+  setup();
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync(LEASH_PATH, pluginLink);
+
+  assert.strictEqual(removePlatform("opencode", getConfigPath("missing"), LEASH_PATH).success, true);
+  assert.throws(() => lstatSync(pluginLink), { code: "ENOENT" });
+  cleanup();
+});
+
+test("given a link to the previous V2 artifact when removing then unlinks it", () => {
+  setup();
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync(LEASH_PATH, pluginLink);
+
+  assert.strictEqual(removePlatform("opencode", getConfigPath("missing"), "/mock/path/to/leash-v2.js").success, true);
+  assert.throws(() => lstatSync(pluginLink), { code: "ENOENT" });
+  cleanup();
+});
+
+test("given an OpenCode V2 installation without permission when removing then unlinks it", () => {
+  setup();
+  const configPath = getConfigPath("v2-remove");
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  writeTestConfig("v2-remove", { plugins: ["other"] });
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync(LEASH_PATH, pluginLink);
+
+  assert.strictEqual(removePlatform("opencode", configPath, LEASH_PATH).success, true);
+  assert.throws(() => lstatSync(pluginLink), { code: "ENOENT" });
+  assert.deepStrictEqual(readTestConfig("v2-remove"), { plugins: ["other"] });
+  cleanup();
+});
+
+test("given an unrelated OpenCode plugin when removing then preserves it", () => {
+  setup();
+  const configPath = getConfigPath("v2-unrelated");
+  const pluginLink = join(TEST_DIR, "plugins", "leash.js");
+  writeTestConfig("v2-unrelated", {});
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync("/other/plugin.js", pluginLink);
+
+  assert.strictEqual(removePlatform("opencode", configPath, LEASH_PATH).notInstalled, true);
+  assert.strictEqual(readlinkSync(pluginLink), "/other/plugin.js");
+  rmSync(pluginLink);
+  writeFileSync(pluginLink, "other plugin");
+  assert.strictEqual(removePlatform("opencode", configPath, LEASH_PATH).notInstalled, true);
+  assert.strictEqual(readFileSync(pluginLink, "utf-8"), "other plugin");
   cleanup();
 });
 
@@ -143,7 +312,7 @@ test("opencode: remove works", () => {
     permission: { bash: { "leash allow *": "ask" } },
   });
 
-  const result = removePlatform("opencode", configPath);
+  const result = removePlatform("opencode", configPath, LEASH_PATH);
 
   assert.strictEqual(result.success, true);
 
@@ -210,7 +379,7 @@ test("opencode: remove preserves JSONC comments", () => {
 }`;
   writeFileSync(configPath, jsoncContent);
 
-  const result = removePlatform("opencode", configPath);
+  const result = removePlatform("opencode", configPath, LEASH_PATH);
 
   assert.strictEqual(result.success, true);
 
@@ -272,6 +441,101 @@ test("pi: remove works", () => {
 });
 
 // Claude Code tests
+test("given unrelated and shared hooks when setting up and removing then preserves unrelated hooks", () => {
+  for (const platform of ["claude-code", "factory"]) {
+    setup();
+    const configPath = getConfigPath(platform);
+    const unrelated = { type: "command", command: "node /other/unleashed.js" };
+    const managed = { type: "command", command: `node ${LEASH_PATH}` };
+    writeTestConfig(platform, { hooks: { SessionStart: [{ hooks: [unrelated] }], PreToolUse: [{ matcher: ".*", hooks: [unrelated, managed] }] } });
+    assert.strictEqual(setupPlatform(platform, configPath, LEASH_PATH).success, true);
+    assert.strictEqual(removePlatform(platform, configPath, LEASH_PATH).success, true);
+    const config = readTestConfig(platform);
+    assert.deepStrictEqual(config.hooks.SessionStart, [{ hooks: [unrelated] }]);
+    assert.deepStrictEqual(config.hooks.PreToolUse, [{ matcher: ".*", hooks: [unrelated] }]);
+    cleanup();
+  }
+});
+
+test("given a shell-sensitive hook path when setting up then quotes it and recognizes it on removal", () => {
+  setup();
+  const configPath = getConfigPath("quoted-hook");
+  const path = "/some dir/it's $HOME/leash.js";
+  assert.strictEqual(setupPlatform("claude-code", configPath, path).success, true);
+  assert.strictEqual(readTestConfig("quoted-hook").hooks.SessionStart[0].hooks[0].command, "node '/some dir/it'\\''s $HOME/leash.js'");
+  assert.strictEqual(setupPlatform("claude-code", configPath, path).skipped, true);
+  assert.strictEqual(removePlatform("claude-code", configPath, path).success, true);
+  assert.deepStrictEqual(readTestConfig("quoted-hook").hooks.SessionStart, []);
+  cleanup();
+});
+
+test("given an unrelated V2 symlink when setting up then leaves link and config unchanged", () => {
+  setup();
+  const configPath = getConfigPath("unrelated-link");
+  writeTestConfig("unrelated-link", { plugin: ["other"] });
+  const original = readFileSync(configPath, "utf8");
+  const link = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync("/other/plugin.js", link);
+  assert.match(setupPlatform("opencode", configPath, LEASH_PATH, true).error, /Refusing to replace/);
+  assert.strictEqual(readlinkSync(link), "/other/plugin.js");
+  assert.strictEqual(readFileSync(configPath, "utf8"), original);
+  cleanup();
+});
+
+test("given an old managed V2 symlink when removing then unlinks it", () => {
+  setup();
+  const link = join(TEST_DIR, "plugins", "leash.js");
+  mkdirSync(join(TEST_DIR, "plugins"));
+  symlinkSync("/old/node_modules/@sailthru/leash/dist/opencode/leash-v2.js", link);
+  assert.strictEqual(removePlatform("opencode", getConfigPath("missing"), LEASH_PATH).success, true);
+  assert.throws(() => lstatSync(link), { code: "ENOENT" });
+  cleanup();
+});
+
+test("given V2 plugin entries when removing then preserves unrelated config and comments", () => {
+  setup();
+  const configPath = getConfigPath("v2-entries");
+  writeFileSync(configPath, '{\n  // keep comment\n  "plugins": ["other", "@sailthru/leash", {"package":"@sailthru/leash@1.2.3"}, {"package":"unrelated"}],\n  "other": true\n}');
+  assert.strictEqual(removePlatform("opencode", configPath, LEASH_PATH).success, true);
+  assert.deepStrictEqual(readConfig(configPath), { plugins: ["other", { package: "unrelated" }], other: true });
+  assert.match(readFileSync(configPath, "utf8"), /keep comment/);
+  cleanup();
+});
+
+test("given multiple managed entries in both plugin arrays when removing then preserves unrelated entries", () => {
+  setup();
+  const configPath = getConfigPath("both-plugin-arrays");
+  writeTestConfig("both-plugin-arrays", {
+    plugin: ["other", LEASH_PATH, "@sailthru/leash@1.2.3", "/other/leash.js"],
+    plugins: [{ package: "other" }, "@sailthru/leash", { package: "@sailthru/leash@2.0.0" }],
+  });
+  assert.strictEqual(removePlatform("opencode", configPath, LEASH_PATH).success, true);
+  assert.deepStrictEqual(readTestConfig("both-plugin-arrays"), {
+    plugin: ["other", "/other/leash.js"],
+    plugins: [{ package: "other" }],
+  });
+  cleanup();
+});
+
+test("given double-quoted hook paths when setting up and removing then preserves unrelated hooks", () => {
+  setup();
+  const configPath = getConfigPath("double-quoted-hook");
+  const path = '/some dir/with "quotes"/leash.js';
+  const managed = { type: "command", command: 'node "/some dir/with \\"quotes\\"/leash.js"' };
+  const unrelated = { type: "command", command: 'node "/other dir/leash.js"' };
+  writeTestConfig("double-quoted-hook", {
+    hooks: { SessionStart: [{ hooks: [managed, unrelated] }], PreToolUse: [{ hooks: [managed, unrelated] }] },
+    permissions: { ask: ["Bash(leash allow *)"] },
+  });
+  assert.strictEqual(setupPlatform("claude-code", configPath, path).skipped, true);
+  assert.strictEqual(removePlatform("claude-code", configPath, path).success, true);
+  const config = readTestConfig("double-quoted-hook");
+  assert.deepStrictEqual(config.hooks.SessionStart, [{ hooks: [unrelated] }]);
+  assert.deepStrictEqual(config.hooks.PreToolUse, [{ hooks: [unrelated] }]);
+  cleanup();
+});
+
 test("claude-code: setup on empty config", () => {
   setup();
   const configPath = getConfigPath("claude-empty");
@@ -334,13 +598,13 @@ test("claude-code: setup skips if already installed", () => {
     hooks: {
       SessionStart: [
         {
-          hooks: [{ type: "command", command: "node /path/to/leash.js" }],
+          hooks: [{ type: "command", command: "node /old/node_modules/@sailthru/leash/dist/claude-code/leash.js" }],
         },
       ],
       PreToolUse: [
         {
           matcher: "Bash|Write|Edit",
-          hooks: [{ type: "command", command: "node /path/to/leash.js" }],
+          hooks: [{ type: "command", command: "node /old/node_modules/@sailthru/leash/dist/claude-code/leash.js" }],
         },
       ],
     },
@@ -360,13 +624,13 @@ test("claude-code: setup adds permission when hooks exist but permission missing
     hooks: {
       SessionStart: [
         {
-          hooks: [{ type: "command", command: "node /path/to/leash.js" }],
+          hooks: [{ type: "command", command: "node /old/node_modules/@sailthru/leash/dist/claude-code/leash.js" }],
         },
       ],
       PreToolUse: [
         {
           matcher: "Bash|Write|Edit",
-          hooks: [{ type: "command", command: "node /path/to/leash.js" }],
+          hooks: [{ type: "command", command: "node /old/node_modules/@sailthru/leash/dist/claude-code/leash.js" }],
         },
       ],
     },
@@ -421,7 +685,7 @@ test("claude-code: remove works", () => {
     },
   });
 
-  const result = removePlatform("claude-code", configPath);
+  const result = removePlatform("claude-code", configPath, LEASH_PATH);
 
   assert.strictEqual(result.success, true);
 
@@ -472,7 +736,7 @@ test("factory: remove works", () => {
     },
   });
 
-  const result = removePlatform("factory", configPath);
+  const result = removePlatform("factory", configPath, LEASH_PATH);
 
   assert.strictEqual(result.success, true);
 

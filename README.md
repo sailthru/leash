@@ -48,6 +48,50 @@ leash update
 | OpenCode      | `leash setup opencode`     |
 | Claude Code   | `leash setup claude-code`  |
 | Factory Droid | `leash setup factory`      |
+| Codex         | `leash setup codex`        |
+
+### Codex CLI and macOS desktop app
+
+Register and install the Codex plugin:
+
+```bash
+leash setup codex
+codex plugin add leash@leash
+```
+
+1. Start a new Codex CLI session with `codex`.
+2. Open `/hooks` and trust both `SessionStart` and `PreToolUse` from `leash@leash`.
+3. Restart the macOS ChatGPT/Codex desktop app. Confirm Leash is enabled in
+   Plugins and review/trust its hook if prompted.
+
+The trusted `SessionStart` hook shows a reminder once per Leash version to
+check that `PreToolUse` is trusted. The reminder does not verify its status.
+
+After updating Leash, refresh Codex's cached plugin and restart your clients:
+
+```bash
+leash update
+codex plugin add leash@leash
+```
+
+Review and trust the updated hook in `/hooks` if requested.
+
+### Uninstall
+
+Remove Leash from a platform:
+
+```bash
+leash remove <platform>
+```
+
+For Codex:
+
+```bash
+leash remove codex
+```
+
+Restart Codex afterward. Removal leaves Codex's cached plugin files intact;
+uninstall Leash through the desktop app if you also want those removed.
 
 
 <details>
@@ -138,6 +182,21 @@ Add to `~/.factory/settings.json`:
   }
 }
 ```
+
+**Codex** - [docs](https://developers.openai.com/codex/hooks/)
+
+```bash
+leash setup codex
+```
+
+This registers and installs Leash's local Codex plugin. In Codex, review and trust
+the hook before use. Restart the ChatGPT desktop app to use the installed plugin.
+
+Leash uses `.codex-plugin/plugin.json`: Codex 0.165.0 skips lifecycle hooks for
+portable root `plugin.json` manifests. If an earlier install shows no hooks,
+run `codex plugin add leash@leash` again to refresh its cached files, restart
+Codex, and review the Leash `PreToolUse` entry in `/hooks`.
+
 
 </details>
 
