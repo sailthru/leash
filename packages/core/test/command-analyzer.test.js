@@ -31,6 +31,21 @@ test("given quoted cp operands when analyzing then preserves destination order",
   assert.strictEqual(analyzer.analyze('cp file "another file" "../outside"').blocked, true);
 });
 
+test("given dash-prefixed operands after an option terminator when analyzing then validates paths", () => {
+  for (const command of [
+    'rm -f -- "-dir/../../outside"',
+    "touch '--' '-dir/../.env'",
+    "mv -- -dir/../../outside safe",
+    "cp -- safe -dir/../../outside",
+    "rm -- -- -dir/../.env",
+  ]) {
+    assert.strictEqual(analyzer.analyze(command).blocked, true, command);
+  }
+  for (const command of ["rm -f -- -safe", "cp -- safe -destination", "touch -option safe"]) {
+    assert.strictEqual(analyzer.analyze(command).blocked, false, command);
+  }
+});
+
 test("given shell separators and assignments when analyzing then checks each command", () => {
   for (const command of ["echo ok\nrm .env", "echo ok & rm .env", "FOO=bar rm .env", "FOO='bar baz' rm ../outside"]) {
     assert.strictEqual(analyzer.analyze(command).blocked, true, command);

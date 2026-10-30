@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from "fs";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 import * as jsonc from "jsonc-parser";
 
 // Types
@@ -242,6 +242,7 @@ function isOpenCodeLeashPlugin(plugin: string | { package: string }, leashPath?:
   const name = typeof plugin === "string" ? plugin : plugin.package;
   return typeof name === "string" && (
     name === leashPath ||
+    (leashPath !== undefined && basename(leashPath) === "leash-v2.js" && name === join(dirname(leashPath), "leash.js")) ||
     /^@sailthru\/leash(?:@[^/]+)?$/.test(name) ||
     /(?:^|\/)node_modules\/@sailthru\/leash\/dist\/opencode\/leash(?:-v2)?\.js$/.test(name)
   );

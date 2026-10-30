@@ -17,7 +17,7 @@ import { createInterface } from "node:readline/promises";
 
 // packages/cli/lib.ts
 import { readFileSync, writeFileSync, mkdirSync, existsSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from "fs";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 
 // node_modules/jsonc-parser/lib/esm/impl/scanner.js
 function createScanner(text, ignoreTrivia = false) {
@@ -1554,7 +1554,7 @@ function writeConfig(configPath, config) {
 }
 function isOpenCodeLeashPlugin(plugin, leashPath) {
   const name = typeof plugin === "string" ? plugin : plugin.package;
-  return typeof name === "string" && (name === leashPath || /^@sailthru\/leash(?:@[^/]+)?$/.test(name) || /(?:^|\/)node_modules\/@sailthru\/leash\/dist\/opencode\/leash(?:-v2)?\.js$/.test(name));
+  return typeof name === "string" && (name === leashPath || leashPath !== void 0 && basename(leashPath) === "leash-v2.js" && name === join(dirname(leashPath), "leash.js") || /^@sailthru\/leash(?:@[^/]+)?$/.test(name) || /(?:^|\/)node_modules\/@sailthru\/leash\/dist\/opencode\/leash(?:-v2)?\.js$/.test(name));
 }
 function setupOpenCode(configPath, leashPath) {
   const formatOptions = { tabSize: 2, insertSpaces: true };

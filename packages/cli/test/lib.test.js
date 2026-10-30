@@ -114,6 +114,35 @@ test("given OpenCode V2 when setting up then migrates the plugin configuration",
   cleanup();
 });
 
+test("given a checkout V1 plugin when setting up V2 then removes the legacy entry", () => {
+  setup();
+  const configPath = getConfigPath("v2-checkout-migration");
+  const v2Path = "/work/leash/dist/opencode/leash-v2.js";
+  writeTestConfig("v2-checkout-migration", {
+    plugin: ["/work/leash/dist/opencode/leash.js", "/other/dist/opencode/leash.js"],
+  });
+
+  assert.strictEqual(setupPlatform("opencode", configPath, v2Path, true).success, true);
+  assert.deepStrictEqual(readTestConfig("v2-checkout-migration").plugins, ["/other/dist/opencode/leash.js"]);
+  cleanup();
+});
+
+test("given checkout V1 entries when removing then removes them without touching unrelated plugins", () => {
+  setup();
+  const configPath = getConfigPath("v2-checkout-removal");
+  const v2Path = "/work/leash/dist/opencode/leash-v2.js";
+  writeTestConfig("v2-checkout-removal", {
+    plugin: ["/work/leash/dist/opencode/leash.js", "/other/dist/opencode/leash.js"],
+    plugins: [{ package: "/work/leash/dist/opencode/leash.js" }, "@other/plugin"],
+  });
+
+  assert.strictEqual(removePlatform("opencode", configPath, v2Path).success, true);
+  const config = readTestConfig("v2-checkout-removal");
+  assert.deepStrictEqual(config.plugin, ["/other/dist/opencode/leash.js"]);
+  assert.deepStrictEqual(config.plugins, ["@other/plugin"]);
+  cleanup();
+});
+
 test("given unrelated leash-named plugins when setting up V1 then preserves them", () => {
   setup();
   const configPath = getConfigPath("v1-unrelated-leash");

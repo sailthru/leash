@@ -123,12 +123,19 @@ export class CommandAnalyzer {
 
   private extractPaths(command: string): string[] {
     const tokens = command.match(/(?:[^\s'"\\]|\\.|'[^']*'|"(?:\\.|[^"\\])*")+/g) || [];
+    let optionsEnded = false;
     return tokens.slice(1).map((token) => {
       const value = token.replace(/'([^']*)'|"((?:\\.|[^"\\])*)"|\\(.)/g,
         (_, single, double, escaped) => single ?? (double !== undefined
           ? double.replace(/\\([\\"$`\n])/g, "$1") : escaped));
       return value;
-    }).filter((token) => token && !token.startsWith("-"));
+    }).filter((token) => {
+      if (!optionsEnded && token === "--") {
+        optionsEnded = true;
+        return false;
+      }
+      return token && (optionsEnded || !token.startsWith("-"));
+    });
   }
 
   private getBaseCommand(command: string): string {

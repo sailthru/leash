@@ -342,13 +342,20 @@ var CommandAnalyzer = class {
   }
   extractPaths(command) {
     const tokens = command.match(/(?:[^\s'"\\]|\\.|'[^']*'|"(?:\\.|[^"\\])*")+/g) || [];
+    let optionsEnded = false;
     return tokens.slice(1).map((token) => {
       const value = token.replace(
         /'([^']*)'|"((?:\\.|[^"\\])*)"|\\(.)/g,
         (_, single, double, escaped) => single ?? (double !== void 0 ? double.replace(/\\([\\"$`\n])/g, "$1") : escaped)
       );
       return value;
-    }).filter((token) => token && !token.startsWith("-"));
+    }).filter((token) => {
+      if (!optionsEnded && token === "--") {
+        optionsEnded = true;
+        return false;
+      }
+      return token && (optionsEnded || !token.startsWith("-"));
+    });
   }
   getBaseCommand(command) {
     const tokens = command.trim().split(/\s+/);
