@@ -15,6 +15,7 @@ test("given built Codex plugin when discovering hooks then uses the hook-capable
   assert.ok(!existsSync(resolve(plugin, "plugin.json")), "Codex 0.165 skips hooks for portable manifests");
   const manifest = JSON.parse(readFileSync(resolve(plugin, ".codex-plugin/plugin.json"), "utf-8"));
   const hooks = JSON.parse(readFileSync(resolve(plugin, manifest.hooks), "utf-8"));
+  assert.equal(hooks.hooks.PreToolUse[0].matcher, "Bash|apply_patch");
   assert.equal(hooks.hooks.PreToolUse[0].hooks[0].command, 'node "${PLUGIN_ROOT}/hooks/leash.mjs"');
   assert.ok(existsSync(leash));
 });
