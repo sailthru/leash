@@ -1,7 +1,12 @@
 import { join as join3 } from "path";
 import { readFileSync as readFileSync2, lstatSync as lstatSync2 } from "fs";
-export function parseLeashrc(content) {
-  const allow = [];
+
+export interface LeashrcConfig {
+  allow: string[];
+}
+
+export function parseLeashrc(content: string): LeashrcConfig {
+  const allow: string[] = [];
   let currentSection = "";
   for (const raw of content.split("\n")) {
     const line = raw.trim();
@@ -17,7 +22,7 @@ export function parseLeashrc(content) {
   }
   return { allow };
 }
-export function readLeashrc(cwd) {
+export function readLeashrc(cwd: string): LeashrcConfig {
   const filePath = join3(cwd, ".leashrc");
   try {
     if (lstatSync2(filePath).isSymbolicLink()) return { allow: [] };

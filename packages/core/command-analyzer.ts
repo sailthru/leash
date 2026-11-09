@@ -39,28 +39,57 @@ export class CommandAnalyzer {
    * Handles: <<EOF, <<'EOF', <<"EOF", <<-EOF
    */
   private stripHeredocs(command: string): string {
-    // Match heredoc start: <<[-]?['"]?DELIMITER['"]?
-    const heredocStart = /<<-?\s*(['"]?)(\w+)\1/g;
-    let result = command;
-    let match;
+    let result = "";
+    let offset = 0;
+    let quote = "";
 
-    while ((match = heredocStart.exec(command)) !== null) {
-      const delimiter = match[2];
-      // Find the delimiter on its own line (possibly with leading tabs for <<-)
-      const endPattern = new RegExp(`\\n\\t*${delimiter}\\s*(?:\\n|$)`);
-      const startIndex = match.index;
-      const contentAfterStart = command.slice(match.index + match[0].length);
-      const endMatch = endPattern.exec(contentAfterStart);
-
-      if (endMatch) {
-        const endIndex =
-          match.index + match[0].length + endMatch.index + endMatch[0].length;
-        // Replace heredoc content with placeholder to preserve command structure
-        result = result.slice(0, startIndex) + result.slice(endIndex);
+    while (offset < command.length) {
+      const lineEnd = command.indexOf("\n", offset);
+      if (lineEnd === -1) break;
+      const line = command.slice(offset, lineEnd);
+      const starts: Array<{ start: number; end: number; delimiter: string; stripTabs: boolean }> = [];
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === "\\" && quote !== "'") { i++; continue; }
+        if (quote) { if (char === quote) quote = ""; continue; }
+        if (char === "'" || char === '"') { quote = char; continue; }
+        if (char === "#" && (i === 0 || /[\s;|&()]/.test(line[i - 1]))) break;
+        if (line.slice(i, i + 2) !== "<<" || line[i + 2] === "<" || line[i - 1] === "<") continue;
+        const match = /^<<(-?)[ \t]*((?:[^\s'"\\;|&()<>]|\\.|'[^']*'|"(?:\\.|[^"\\])*")+)/.exec(line.slice(i));
+        if (!match) continue;
+        const delimiter = match[2].replace(/'([^']*)'|"((?:\\.|[^"\\])*)"|\\(.)/g,
+          (_, single, double, escaped) => single ?? (double !== undefined ? double.replace(/\\([\\"$`])/g, "$1") : escaped));
+        starts.push({ start: i, end: i + match[0].length, delimiter, stripTabs: !!match[1] });
+        i += match[0].length - 1;
       }
+      if (starts.length === 0) {
+        result += line + "\n";
+        offset = lineEnd + 1;
+        continue;
+      }
+
+      let bodyEnd = lineEnd + 1;
+      for (const start of starts) {
+        let found = false;
+        while (bodyEnd < command.length) {
+          const end = command.indexOf("\n", bodyEnd);
+          const bodyLine = command.slice(bodyEnd, end === -1 ? command.length : end);
+          bodyEnd = end === -1 ? command.length : end + 1;
+          if ((start.stripTabs ? bodyLine.replace(/^\t*/, "") : bodyLine) === start.delimiter) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) return result + command.slice(offset);
+      }
+
+      let retained = line;
+      for (const start of starts.reverse()) retained = retained.slice(0, start.start) + retained.slice(start.end);
+      result += retained + "\n";
+      offset = bodyEnd;
     }
 
-    return result;
+    return result + command.slice(offset);
   }
 
   private isPathAllowed(
@@ -93,24 +122,20 @@ export class CommandAnalyzer {
   }
 
   private extractPaths(command: string): string[] {
-    const paths: string[] = [];
-
-    const quoted = command.match(/["']([^"']+)["']/g) || [];
-    quoted.forEach((q) => paths.push(q.slice(1, -1)));
-
-    const tokens = command
-      .replace(/["'][^"']*["']/g, "")
-      .split(/\s+/)
-      .filter((t) => !t.startsWith("-"));
-
-    for (let i = 1; i < tokens.length; i++) {
-      const value = tokens[i].includes("=")
-        ? tokens[i].split("=").slice(1).join("=")
-        : tokens[i];
-      if (value) paths.push(value);
-    }
-
-    return paths;
+    const tokens = command.match(/(?:[^\s'"\\]|\\.|'[^']*'|"(?:\\.|[^"\\])*")+/g) || [];
+    let optionsEnded = false;
+    return tokens.slice(1).map((token) => {
+      const value = token.replace(/'([^']*)'|"((?:\\.|[^"\\])*)"|\\(.)/g,
+        (_, single, double, escaped) => single ?? (double !== undefined
+          ? double.replace(/\\([\\"$`\n])/g, "$1") : escaped));
+      return value;
+    }).filter((token) => {
+      if (!optionsEnded && token === "--") {
+        optionsEnded = true;
+        return false;
+      }
+      return token && (optionsEnded || !token.startsWith("-"));
+    });
   }
 
   private getBaseCommand(command: string): string {
@@ -201,6 +226,12 @@ export class CommandAnalyzer {
       }
 
       if (!inSingleQuote && !inDoubleQuote) {
+        if ((char === "|" && current.endsWith(">")) ||
+            (char === "&" && (nextChar === ">" || current.endsWith(">")))) {
+          current += char;
+          i++;
+          continue;
+        }
         if (
           (char === "&" && nextChar === "&") ||
           (char === "|" && nextChar === "|")
@@ -211,7 +242,7 @@ export class CommandAnalyzer {
           continue;
         }
 
-        if (char === ";" || (char === "|" && nextChar !== "|")) {
+        if (char === ";" || char === "\n" || char === "&" || char === "|") {
           if (current.trim()) commands.push(current.trim());
           current = "";
           i++;
@@ -248,7 +279,7 @@ export class CommandAnalyzer {
         if (char === quote) {
           quote = null;
         } else {
-          if (char === "$" && quote !== "'") dynamic = true;
+          if ((char === "$" || char === "`") && quote !== "'") dynamic = true;
           path += char;
         }
         continue;
@@ -259,7 +290,7 @@ export class CommandAnalyzer {
       } else if (/\s/.test(char) || ";|&()<>".includes(char)) {
         break;
       } else {
-        if (char === "$") dynamic = true;
+        if (char === "$" || char === "`") dynamic = true;
         path += char;
       }
     }
@@ -267,14 +298,13 @@ export class CommandAnalyzer {
     return path ? { path, dynamic } : null;
   }
 
-  private checkRedirects(command: string): AnalysisResult {
-    // Strip heredoc content to avoid false positives from embedded code
-    const strippedCommand = this.stripHeredocs(command);
-    const matches = strippedCommand.matchAll(REDIRECT_PATTERN);
+  private checkRedirects(command: string, resolveBase?: string): AnalysisResult {
+    const matches = command.matchAll(REDIRECT_PATTERN);
 
     for (const match of matches) {
+      if (match[0].includes(">&") && /^(?:\d+|-)(?=\s|[;|&()]|$)/.test(command.slice(match.index + match[0].length))) continue;
       const redirect = this.extractRedirectPath(
-        strippedCommand,
+        command,
         match.index + match[0].length
       );
       if (!redirect) continue;
@@ -287,17 +317,13 @@ export class CommandAnalyzer {
       }
 
       const { path } = redirect;
-      if (
-        !this.pathValidator.isSafeForWrite(path) &&
-        !this.pathValidator.isWithinAllowedDir(path) &&
-        !this.pathValidator.isPlatformPath(path)
-      ) {
+      if (!this.isPathAllowed(path, true, resolveBase)) {
         return {
           blocked: true,
           reason: `Redirect to path outside working directory: ${path}`,
         };
       }
-      const result = this.checkProtectedPath(path, "Redirect");
+      const result = this.checkProtectedPath(path, "Redirect", resolveBase);
       if (result.blocked) return result;
     }
 
@@ -531,10 +557,9 @@ export class CommandAnalyzer {
     const gitResult = this.checkAlwaysBlockedPatterns(command);
     if (gitResult.blocked) return gitResult;
 
-    const redirectResult = this.checkRedirects(command);
-    if (redirectResult.blocked) return redirectResult;
-
-    const commands = this.splitCommands(command);
+    const commands = this.splitCommands(this.stripHeredocs(command)).map((cmd) =>
+      cmd.replace(/^(?:[a-zA-Z_][a-zA-Z0-9_]*=(?:[^\s'"\\]|\\.|'[^']*'|"(?:\\.|[^"\\])*")*\s+)+/, "")
+    );
     const hasCd = commands.some((cmd) => this.isCdCommand(cmd.trim()));
 
     if (!hasCd) {
@@ -548,6 +573,11 @@ export class CommandAnalyzer {
       const trimmed = cmd.trim();
       if (!trimmed) continue;
 
+      const resolveBase =
+        currentWorkDir !== this.workingDirectory ? currentWorkDir : undefined;
+      const redirectResult = this.checkRedirects(trimmed, resolveBase);
+      if (redirectResult.blocked) return redirectResult;
+
       if (this.isCdCommand(trimmed)) {
         const target = this.extractCdTarget(trimmed);
         if (target) {
@@ -556,9 +586,6 @@ export class CommandAnalyzer {
         }
         continue;
       }
-
-      const resolveBase =
-        currentWorkDir !== this.workingDirectory ? currentWorkDir : undefined;
 
       if (hasCd) {
         const patternResult = this.checkDangerousPatterns(trimmed, resolveBase);

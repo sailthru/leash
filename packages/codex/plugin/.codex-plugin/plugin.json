@@ -1,0 +1,6 @@
+{
+  "name": "leash",
+  "version": "1.1.0",
+  "description": "Security guardrails for AI coding agents.",
+  "hooks": "./hooks/hooks.json"
+}
